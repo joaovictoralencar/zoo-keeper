@@ -1,0 +1,161 @@
+{
+  "world": {
+    "bounds":          { "xMin": -15, "xMax": 20, "zMin": -12.5, "zMax": 4 },
+    "enclosureEntryZ": -2.8,
+    "timerDuration":   20,
+    "interactRange":   3.5,
+    "speed":           5
+  },
+
+  "environment": {
+    "skyColor":            "#87ceeb",
+    "groundColor":         "#5a9e3a",
+    "groundWidth":         80,
+    "groundDepth":         50,
+    "pathColor":           "#c8a46e",
+    "pathWidth":           80,
+    "pathDepth":           6,
+    "enclosureFloorColor": "#e8d5a0",
+    "enclosureFloorSize":  8
+  },
+
+  "fence": {
+    "model":        "assets/graveyard/iron-fence-border.glb",
+    "segmentWidth": 1,
+    "halfWidth":    4,
+    "zFront":       -3,
+    "zBack":        -11,
+    "gatePanels":   2
+  },
+
+  "player": {
+    "model":  "assets/character-male-e.glb",
+    "startX": -12,
+    "startZ": 0,
+    "scale":  1.5
+  },
+
+  "enclosures": [
+    { "id": "monkey",   "phase": "monkey",   "centerX": -9, "zoneXMin": -14, "zoneXMax": -4 },
+    { "id": "elephant", "phase": "elephant", "centerX":  0, "zoneXMin":  -5, "zoneXMax":  5 },
+    { "id": "lion",     "phase": "lion_toy", "centerX": 11, "zoneXMin":   6, "zoneXMax": 16 }
+  ],
+
+  "animals": [
+    {
+      "id": "monkey",   "enclosureId": "monkey",
+      "model": "assets/pets/animal-monkey.glb",
+      "spawnZ": -7, "targetHeight": 0.7,
+      "startLocked": false, "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐒"
+    },
+    {
+      "id": "elephant", "enclosureId": "elephant",
+      "model": "assets/pets/animal-elephant.glb",
+      "spawnZ": -7, "targetHeight": 1.7,
+      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐘"
+    },
+    {
+      "id": "lion",     "enclosureId": "lion",
+      "model": "assets/pets/animal-lion.glb",
+      "spawnZ": -7, "targetHeight": 1.0,
+      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🦁"
+    }
+  ],
+
+  "items": [
+    {
+      "type": "banana", "model": "assets/food/banana.glb", "scale": 2,
+      "position": { "x": -8, "y": 0.5, "z": -1.5 },
+      "bubbleIcon": "icon-banana", "iconAsset": "assets/food/icons/banana.png"
+    },
+    {
+      "type": "water",  "model": "assets/food/barrel.glb", "scale": 0.65,
+      "position": { "x": 0,  "y": 0.5, "z": -1.5 },
+      "bubbleIcon": "icon-barrel", "iconAsset": "assets/food/icons/barrel.png"
+    },
+    {
+      "type": "toy",    "model": null, "scale": 1,
+      "position": { "x": 8,  "y": 0.5, "z": -1.5 },
+      "bubbleIcon": null, "bubbleEmoji": "🎾", "iconAsset": null
+    },
+    {
+      "type": "food",   "model": "assets/food/turkey.glb", "scale": 1.6,
+      "position": { "x": 13, "y": 0.5, "z": -4 },
+      "bubbleIcon": "icon-turkey", "iconAsset": "assets/food/icons/turkey.png",
+      "startVisible": false
+    }
+  ],
+
+  "phases": [
+    {
+      "id": "monkey",   "enclosureId": "monkey",   "animalId": "monkey",
+      "requiredItem": "banana", "deliveryLabel": "🎁",
+      "onComplete": { "unlockAnimalId": "elephant", "nextPhase": "elephant" }
+    },
+    {
+      "id": "elephant", "enclosureId": "elephant", "animalId": "elephant",
+      "requiredItem": "water",  "deliveryLabel": "🎁",
+      "onComplete": { "unlockAnimalId": "lion", "nextPhase": "lion_toy" }
+    },
+    {
+      "id": "lion_toy", "enclosureId": "lion",      "animalId": "lion",
+      "requiredItem": "toy",    "deliveryLabel": "🎁",
+      "onComplete": { "showItemType": "food", "nextPhase": "lion_food" }
+    },
+    {
+      "id": "lion_food","enclosureId": "lion",      "animalId": "lion",
+      "requiredItem": "food",   "deliveryLabel": "🎁",
+      "onComplete": { "nextPhase": "done", "endGame": true }
+    }
+  ],
+
+  "props": [
+    { "model": "assets/env/coaster/bench.glb",       "x": -13, "y": 0, "z": 4.8, "scale": 2.5 },
+    { "model": "assets/env/coaster/bench.glb",       "x":  -4, "y": 0, "z": 4.8, "scale": 2.5 },
+    { "model": "assets/env/coaster/bench.glb",       "x":   6, "y": 0, "z": 4.8, "scale": 2.5 },
+    { "model": "assets/env/coaster/bench.glb",       "x":  16, "y": 0, "z": 4.8, "scale": 2.5 },
+
+    { "model": "assets/env/coaster/trash.glb",       "x":  -6, "y": 0, "z": 3.8 },
+    { "model": "assets/env/coaster/trash.glb",       "x":   4, "y": 0, "z": 3.8 },
+    { "model": "assets/env/coaster/trash.glb",       "x":  14, "y": 0, "z": 3.8 },
+
+    { "model": "assets/env/coaster/flowers.glb",     "x": -11, "y": 0, "z": 4.3, "scale": 1.2 },
+    { "model": "assets/env/coaster/flowers.glb",     "x":   1, "y": 0, "z": 4.3, "scale": 1.2 },
+    { "model": "assets/env/coaster/flowers.glb",     "x":  10, "y": 0, "z": 4.3, "scale": 1.2 },
+
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x": -12, "y": 0, "z": -5  },
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x":  -7, "y": 0, "z": -9  },
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x":  -3, "y": 0, "z": -5  },
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x":   2, "y": 0, "z": -9  },
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x":   8, "y": 0, "z": -5  },
+    { "model": "assets/env/graveyard/hay-bale.glb",  "x":  14, "y": 0, "z": -9  },
+
+    { "model": "assets/env/graveyard/rocks.glb",     "x": -11, "y": 0, "z": -8,   "scale": 0.5 },
+    { "model": "assets/env/graveyard/rocks.glb",     "x":  -6, "y": 0, "z": -6,   "scale": 0.4 },
+    { "model": "assets/env/graveyard/rocks.glb",     "x":   3, "y": 0, "z": -8,   "scale": 0.5 },
+    { "model": "assets/env/graveyard/rocks.glb",     "x":  13, "y": 0, "z": -6,   "scale": 0.4 },
+
+    { "model": "assets/env/graveyard/pine.glb",      "x": -14, "y": 0, "z": -12,  "scale": 1.3 },
+    { "model": "assets/env/graveyard/pine.glb",      "x": -10, "y": 0, "z": -12.5,"scale": 1.1 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":  -5, "y": 0, "z": -12,  "scale": 1.3 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":  -1, "y": 0, "z": -12.5,"scale": 1.1 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":   4, "y": 0, "z": -12,  "scale": 1.3 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":   8, "y": 0, "z": -12.5,"scale": 1.1 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":  13, "y": 0, "z": -12,  "scale": 1.3 },
+    { "model": "assets/env/graveyard/pine.glb",      "x":  17, "y": 0, "z": -12.5,"scale": 1.1 },
+
+    { "model": "assets/env/coaster/tree.glb",        "x": -15, "y": 0, "z": -4,   "scale": 1.4 },
+    { "model": "assets/env/coaster/tree.glb",        "x":  -5, "y": 0, "z": -3.5, "scale": 1.4 },
+    { "model": "assets/env/coaster/tree.glb",        "x":   5, "y": 0, "z": -4,   "scale": 1.4 },
+    { "model": "assets/env/coaster/tree.glb",        "x":  16, "y": 0, "z": -3.5, "scale": 1.4 }
+  ],
+
+  "tutorial": {
+    "steps": [
+      { "gesture": "swipe", "verb": "SWIPE", "desc": "the joystick to move" },
+      { "gesture": "tap",   "verb": "TAP",   "desc": "items to pick up" },
+      { "gesture": "tap",   "verb": "TAP",   "desc": "animals to deliver" }
+    ],
+    "autoDismissMs": 9000
+  }
+}

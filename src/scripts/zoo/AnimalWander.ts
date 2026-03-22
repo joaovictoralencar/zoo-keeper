@@ -68,6 +68,8 @@ export class AnimalWander {
     this.waiting = false
   }
 
+  get isMoving(): boolean { return !this.waiting && !!this.target }
+
   update(dt: number) {
     const pos = this.entity.position
 
