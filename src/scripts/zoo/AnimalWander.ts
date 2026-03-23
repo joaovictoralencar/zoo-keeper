@@ -15,6 +15,11 @@ export interface AnimalWanderConfig {
   waitTime?: number      // seconds to wait at each waypoint
   jumpHeight?: number    // peak of idle bounce (world units)
   jumpSpeed?: number     // frequency of idle bounce
+  // Rectangular hard bounds — animals cannot step outside these
+  xMin?: number
+  xMax?: number
+  zMin?: number
+  zMax?: number
 }
 
 export class AnimalWander {
@@ -32,6 +37,10 @@ export class AnimalWander {
   private readonly waitTime: number
   private readonly jumpHeight: number
   private readonly jumpSpeed: number
+  private readonly xMin: number
+  private readonly xMax: number
+  private readonly zMin: number
+  private readonly zMax: number
 
   constructor(entity: Group, config: AnimalWanderConfig = {}) {
     this.entity = entity
@@ -43,8 +52,18 @@ export class AnimalWander {
     this.waitTime     = config.waitTime     ?? 2
     this.jumpHeight   = config.jumpHeight   ?? 0.25
     this.jumpSpeed    = config.jumpSpeed    ?? 4
+    this.xMin = config.xMin ?? -Infinity
+    this.xMax = config.xMax ??  Infinity
+    this.zMin = config.zMin ?? -Infinity
+    this.zMax = config.zMax ??  Infinity
 
     this.pickNewTarget()
+  }
+
+  private clampTarget(v: Vector3): Vector3 {
+    v.x = Math.max(this.xMin, Math.min(this.xMax, v.x))
+    v.z = Math.max(this.zMin, Math.min(this.zMax, v.z))
+    return v
   }
 
   private pickNewTarget(towardOrigin?: Vector3) {
@@ -60,11 +79,11 @@ export class AnimalWander {
 
     const dist = (0.3 + Math.random() * 0.7) * this.wanderRadius
 
-    this.target = new Vector3(
+    this.target = this.clampTarget(new Vector3(
       this.origin.x + Math.sin(angle) * dist,
       this.baseY,
       this.origin.z + Math.cos(angle) * dist
-    )
+    ))
     this.waiting = false
   }
 
@@ -121,11 +140,9 @@ export class AnimalWander {
 
     dir.normalize()
 
-    this.entity.position.set(
-      pos.x + dir.x * this.moveSpeed * dt,
-      this.baseY,
-      pos.z + dir.z * this.moveSpeed * dt
-    )
+    const nx = Math.max(this.xMin, Math.min(this.xMax, pos.x + dir.x * this.moveSpeed * dt))
+    const nz = Math.max(this.zMin, Math.min(this.zMax, pos.z + dir.z * this.moveSpeed * dt))
+    this.entity.position.set(nx, this.baseY, nz)
 
     // Rotate to face movement direction
     this.entity.rotation.y = Math.atan2(dir.x, dir.z)

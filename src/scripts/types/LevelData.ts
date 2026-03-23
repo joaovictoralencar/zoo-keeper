@@ -37,11 +37,13 @@ export interface PlayerConfig {
 }
 
 export interface EnclosureConfig {
-  id:        string
-  phase:     string   // first phase that uses this enclosure
-  centerX:   number
-  zoneXMin:  number
-  zoneXMax:  number
+  id:               string
+  phase:            string   // first phase that uses this enclosure
+  centerX:          number
+  zoneXMin:         number
+  zoneXMax:         number
+  unlockCost:       number   // stars needed to unlock; 0 = starts purchased
+  unlockRequires?:  string   // enclosure id that must be purchased first
 }
 
 export interface AnimalConfig {
@@ -49,11 +51,14 @@ export interface AnimalConfig {
   enclosureId: string
   model:       string
   spawnZ:      number
+  spawnY?:     number     // override Y after normalisation; 0 = force ground level
   targetHeight: number
   startLocked: boolean
   wanderRadius: number
   moveSpeed:   number
   emoji:       string
+  count?:      number     // how many instances to spawn (default 1)
+  scale?:      number     // extra uniform scale multiplier applied after normalisation
 }
 
 export interface ItemConfig {
@@ -68,19 +73,21 @@ export interface ItemConfig {
 }
 
 export interface PhaseOnComplete {
-  unlockAnimalId?: string
-  showItemType?:   string
-  nextPhase:       string
-  endGame?:        boolean
+  starsAwarded?: number
+  showItemType?: string
+  nextPhase:     string
+  endGame?:      boolean
 }
 
 export interface PhaseConfig {
-  id:            string
-  enclosureId:   string
-  animalId:      string
-  requiredItem:  string
-  deliveryLabel: string
-  onComplete:    PhaseOnComplete
+  id:                  string
+  enclosureId:         string
+  animalId:            string
+  requiredItem:        string
+  deliveryLabel:       string
+  deliveryIcon?:       string
+  deliveryIconAsset?:  string
+  onComplete:          PhaseOnComplete
 }
 
 export interface PropConfig {

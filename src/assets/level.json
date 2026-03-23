@@ -36,28 +36,28 @@
   },
 
   "enclosures": [
-    { "id": "monkey",   "phase": "monkey",   "centerX": -9, "zoneXMin": -14, "zoneXMax": -4 },
-    { "id": "elephant", "phase": "elephant", "centerX":  0, "zoneXMin":  -5, "zoneXMax":  5 },
-    { "id": "lion",     "phase": "lion_toy", "centerX": 11, "zoneXMin":   6, "zoneXMax": 16 }
+    { "id": "monkey",   "phase": "monkey",   "centerX": -9, "zoneXMin": -14, "zoneXMax": -4, "unlockCost": 0  },
+    { "id": "elephant", "phase": "elephant", "centerX":  0, "zoneXMin":  -5, "zoneXMax":  5, "unlockCost": 25 },
+    { "id": "lion",     "phase": "lion_toy", "centerX": 11, "zoneXMin":   6, "zoneXMax": 16, "unlockCost": 75, "unlockRequires": "elephant" }
   ],
 
   "animals": [
     {
       "id": "monkey",   "enclosureId": "monkey",
       "model": "assets/pets/animal-monkey.glb",
-      "spawnZ": -7, "targetHeight": 0.7,
+      "spawnZ": -6, "targetHeight": 0.7, "count": 5,
       "startLocked": false, "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐒"
     },
     {
       "id": "elephant", "enclosureId": "elephant",
       "model": "assets/pets/animal-elephant.glb",
-      "spawnZ": -7, "targetHeight": 1.7,
+      "spawnZ": -6, "spawnY": 0, "targetHeight": 1.7, "count": 3,
       "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐘"
     },
     {
       "id": "lion",     "enclosureId": "lion",
       "model": "assets/pets/animal-lion.glb",
-      "spawnZ": -7, "targetHeight": 1.0,
+      "spawnZ": -7, "spawnY": 0, "targetHeight": 1.0, "scale": 1.2,
       "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🦁"
     }
   ],
@@ -69,7 +69,7 @@
       "bubbleIcon": "icon-banana", "iconAsset": "assets/food/icons/banana.png"
     },
     {
-      "type": "water",  "model": "assets/food/barrel.glb", "scale": 0.65,
+      "type": "water",  "model": "assets/food/barrel.glb", "scale": 1.1,
       "position": { "x": 0,  "y": 0.5, "z": -1.5 },
       "bubbleIcon": "icon-barrel", "iconAsset": "assets/food/icons/barrel.png"
     },
@@ -90,22 +90,26 @@
     {
       "id": "monkey",   "enclosureId": "monkey",   "animalId": "monkey",
       "requiredItem": "banana", "deliveryLabel": "🎁",
-      "onComplete": { "unlockAnimalId": "elephant", "nextPhase": "elephant" }
+      "deliveryIcon": "icon-delivery-banana", "deliveryIconAsset": "assets/ui/banana.png",
+      "onComplete": { "starsAwarded": 50, "nextPhase": "elephant" }
     },
     {
       "id": "elephant", "enclosureId": "elephant", "animalId": "elephant",
       "requiredItem": "water",  "deliveryLabel": "🎁",
-      "onComplete": { "unlockAnimalId": "lion", "nextPhase": "lion_toy" }
+      "deliveryIcon": "icon-delivery-barrel", "deliveryIconAsset": "assets/ui/barrel.png",
+      "onComplete": { "starsAwarded": 50, "nextPhase": "lion_toy" }
     },
     {
       "id": "lion_toy", "enclosureId": "lion",      "animalId": "lion",
       "requiredItem": "toy",    "deliveryLabel": "🎁",
+      "deliveryIcon": "icon-delivery-coconut", "deliveryIconAsset": "assets/ui/coconut.png",
       "onComplete": { "showItemType": "food", "nextPhase": "lion_food" }
     },
     {
       "id": "lion_food","enclosureId": "lion",      "animalId": "lion",
       "requiredItem": "food",   "deliveryLabel": "🎁",
-      "onComplete": { "nextPhase": "done", "endGame": true }
+      "deliveryIcon": "icon-delivery-turkey", "deliveryIconAsset": "assets/ui/turkey.png",
+      "onComplete": { "starsAwarded": 50, "nextPhase": "done", "endGame": true }
     }
   ],
 
