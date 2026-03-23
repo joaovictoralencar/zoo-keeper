@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "scripts": {
     "start": "webpack serve --config webpack/webpack.dev.js",
-    "build": "webpack --config webpack/webpack.prod.js"
+    "build": "webpack --config webpack/webpack.prod.js",
+    "bundle": "npm run build && node scripts/inline.js"
   },
   "dependencies": {
     "@enable3d/phaser-extension": "0.26.1",
