@@ -17,6 +17,8 @@ import {
 import { projectToScreen, clampToScreenEdge } from '../utils/WorldUI'
 import { createActionBubble, createPurchaseBubble } from '../ui/BubbleFactory'
 import { AssetLoader } from '../utils/AssetLoader'
+import { SoundManager } from '../managers/SoundManager'
+import { AudioConfig } from '../config/AudioConfig'
 
 function parseHex(s: string): number {
     return parseInt(s.replace('#', '0x'), 16)
@@ -41,6 +43,7 @@ export default class GameScene extends Scene3D {
     // ── level data ────────────────────────────────────────────────────────
     private ld!: LevelData
     private assetLoader!: AssetLoader
+    private sfx!: SoundManager
 
     // ── movement ─────────────────────────────────────────────────────────
     private moveData = {top: 0, right: 0}
@@ -51,6 +54,9 @@ export default class GameScene extends Scene3D {
     private walkAction: AnimationAction | null = null
     private isMoving = false
     private elapsedTime = 0
+    // Pre-created looping footstep sounds — created once, played/stopped directly
+    private footstepSounds: Phaser.Sound.BaseSound[] = []
+    private footstepSound: Phaser.Sound.BaseSound | null = null
 
     // ── game state ────────────────────────────────────────────────────────
     private phase = 'monkey'
@@ -135,6 +141,17 @@ export default class GameScene extends Scene3D {
         this.load.image('ui-cta-bg',       'assets/ui/cta-background.png')
         this.load.image('ui-broken-star',  'assets/ui/broken-star.png')
         this.load.image('ui-button-red',   'assets/ui/button-red.png')
+        // Audio
+        this.load.audio('bgm',            'assets/audios/bgm.mp3')
+        this.load.audio('sfx-whoosh',     'assets/audios/Whoosh.mp3')
+        this.load.audio('sfx-coin',       'assets/audios/Coin Bag 3-1.mp3')
+        this.load.audio('sfx-win',        'assets/audios/win-sound.mp3')
+        this.load.audio('sfx-monkey',     'assets/audios/monkey.mp3')
+        this.load.audio('sfx-elephant',   'assets/audios/elephant.mp3')
+        this.load.audio('sfx-lion',       'assets/audios/lion.mp3')
+        this.load.audio('sfx-footstep-1', 'assets/audios/Footsteps_Sand_Walk_01.mp3')
+        this.load.audio('sfx-footstep-2', 'assets/audios/Footsteps_Sand_Walk_10.mp3')
+        this.load.audio('sfx-footstep-3', 'assets/audios/Footsteps_Sand_Walk_17.mp3')
     }
 
     // ── LIFECYCLE ────────────────────────────────────────────────────────
@@ -142,6 +159,14 @@ export default class GameScene extends Scene3D {
     async create() {
         this.ld = this.cache.json.get('level') as LevelData
         this.assetLoader = new AssetLoader(this.third)
+        this.sfx = new SoundManager(this, { musicVolume: AudioConfig.master.music, sfxVolume: AudioConfig.master.sfx })
+        this.sfx.playMusic('bgm', { fadeIn: AudioConfig.timing.musicFadeIn })
+        // Pre-create looping footstep sounds so we always hold a reliable reference
+        this.footstepSounds = [
+            this.sound.add('sfx-footstep-1', { loop: true, volume: AudioConfig.sfx.footstep }),
+            this.sound.add('sfx-footstep-2', { loop: true, volume: AudioConfig.sfx.footstep }),
+            this.sound.add('sfx-footstep-3', { loop: true, volume: AudioConfig.sfx.footstep }),
+        ]
 
         // Kick off font load (non-blocking — falls back to system font immediately)
         document.fonts.load(`700 16px "Baloo 2"`).catch(() => {})
@@ -579,6 +604,9 @@ export default class GameScene extends Scene3D {
         if (!phase) return
         const {onComplete} = phase
 
+        // Animal reaction sound — key matches the animal id (monkey/elephant/lion)
+        this.sfx.playSfx(`sfx-${phase.animalId}`, { volume: AudioConfig.sfx.animal })
+
         const enc = this.ld.enclosures.find(e => e.id === phase.enclosureId)
         const groups = this.animalGroups.get(phase.animalId) ?? []
         const group = groups[0]  // reference point for projection
@@ -722,6 +750,9 @@ export default class GameScene extends Scene3D {
                     duration: 480, ease: 'Quad.easeIn',
                     onComplete: () => {
                         star.destroy()
+                        // Coin ding per star — pitch rises slightly each hit
+                        const rate = 0.9 + (i / (visual - 1)) * 0.2
+                        this.sfx.playSfx('sfx-coin', { volume: AudioConfig.sfx.coinStar, rate })                        
                         this.starCount = oldCount + Math.round(count * (i + 1) / visual)
                         if (this.starHudText) this.starHudText.setText(String(this.starCount))
                         if (i === visual - 1) {
@@ -984,8 +1015,14 @@ export default class GameScene extends Scene3D {
     private purchaseEnclosure(encId: string) {
         const enc = this.ld.enclosures.find(e => e.id === encId)
         if (!enc) return
+        // Guard first — prevents double-purchase from rapid taps
+        if (this.purchasedEnclosures.has(encId)) return
+        this.purchasedEnclosures.add(encId)
+
         const cost = enc.unlockCost ?? 0
         if (this.starCount < cost) {
+            // Not enough stars — roll back the reservation and shake the HUD
+            this.purchasedEnclosures.delete(encId)
             if (this.starHud) {
                 const ox = this.starHud.x
                 this.tweens.killTweensOf(this.starHud)
@@ -998,7 +1035,7 @@ export default class GameScene extends Scene3D {
             return
         }
         this.starCount -= cost
-        this.purchasedEnclosures.add(encId)
+        this.sfx.playSfx('sfx-coin', { volume: AudioConfig.sfx.coin })
         if (this.starHudText) this.starHudText.setText(String(this.starCount))
 
         const animalCfg = this.ld.animals.find(a => a.enclosureId === encId)
@@ -1207,11 +1244,16 @@ export default class GameScene extends Scene3D {
                 this.idleAction?.fadeOut(0.2);
                 this.walkAction?.reset().fadeIn(0.2).play();
                 this.isMoving = true
+                const idx = Math.floor(Math.random() * this.footstepSounds.length)
+                this.footstepSound = this.footstepSounds[idx]
+                this.footstepSound.play()
             }
         } else if (this.isMoving) {
             this.walkAction?.fadeOut(0.2);
             this.idleAction?.reset().fadeIn(0.2).play();
             this.isMoving = false
+            this.footstepSound?.stop()
+            this.footstepSound = null
         }
         this.player.position.x = Math.max(bounds.xMin, Math.min(bounds.xMax, this.player.position.x))
         this.player.position.z = Math.max(bounds.zMin, Math.min(bounds.zMax, this.player.position.z))
@@ -1249,6 +1291,7 @@ export default class GameScene extends Scene3D {
         if (existingWiggle) existingWiggle.stop()
         this.tweens.killTweensOf(c)
         c.setVisible(true).setScale(0).setAngle(0)
+        this.sfx.playSfx('sfx-whoosh', { volume: AudioConfig.sfx.whoosh })
         this.tweens.add({
             targets: c, scaleX: 1, scaleY: 1,
             duration: 300, ease: 'Back.easeOut',
@@ -1450,6 +1493,10 @@ export default class GameScene extends Scene3D {
     private showEndcard() {
         const cx = GAME_W / 2
 
+        // Fade out music and play win fanfare
+        this.sfx.stopMusic(AudioConfig.timing.musicFadeOut)
+        this.sfx.playSfx('sfx-win', { volume: AudioConfig.sfx.win })
+
         // Hide joystick DOM element
         if (this.joystickEl) this.joystickEl.style.display = 'none'
 
@@ -1550,6 +1597,11 @@ export default class GameScene extends Scene3D {
             this.joystickEl.remove()
             this.joystickEl = null
         }
+
+        // Stop audio
+        this.footstepSound?.stop()
+        this.footstepSound = null
+        this.sfx.destroy()
 
         // Stop all tweens
         this.tweens.killAll()

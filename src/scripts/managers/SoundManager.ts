@@ -81,11 +81,15 @@ export class SoundManager {
             return null
         }
         const effectiveVolume = this._muted ? 0 : (options.volume ?? 1) * this._sfxVolume
-        return this.scene.sound.play(key, {
+        const result = this.scene.sound.play(key, {
             volume: effectiveVolume,
             rate:   options.rate ?? 1,
             loop:   options.loop ?? false,
-        }) as unknown as Phaser.Sound.BaseSound
+        })
+        // scene.sound.play() returns false when the AudioContext is locked or
+        // the sound manager is a NoAudioSoundManager — guard before returning
+        if (!result || typeof result === 'boolean') return null
+        return result as Phaser.Sound.BaseSound
     }
 
     // ── MUSIC ─────────────────────────────────────────────────────────────────
