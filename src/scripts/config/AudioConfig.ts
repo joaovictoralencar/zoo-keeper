@@ -11,13 +11,13 @@
 export const AudioConfig = {
     /** Master volumes fed into SoundManager */
     master: {
-        music: 0.25,  // BGM overall level  — raise for louder music
+        music: 0.3,  // BGM overall level  — raise for louder music
         sfx:   0.85,  // SFX overall level  — raise/lower all SFX together
     },
 
     /** Per-sound relative volumes (0–1, scaled by master.sfx) */
     sfx: {
-        footstep: 0.20,  // looping walk sound — lower = quieter footsteps
+        footstep: 0.7,  // looping walk sound — lower = quieter footsteps
         whoosh:   1.0,   // bubble pop-in
         animal:   0.75,  // monkey / elephant / lion delivery cheer
         coin:     1.0,   // enclosure purchase

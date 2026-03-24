@@ -482,6 +482,28 @@ export default class GameScene extends Scene3D {
 
     // ── ITEMS ────────────────────────────────────────────────────────────
 
+    /** Returns a random position inside `enc` that is at least `minDist` units
+     *  from the player. Falls back to the back-centre of the enclosure. */
+    private safeItemSpawnPos(enc: EnclosureConfig, baseY: number, minDist = 4): Vector3 {
+        const playerPos = this.player?.position ?? new Vector3(enc.centerX, 0, -8)
+        const halfW = enc.width * 0.4
+        for (let i = 0; i < 20; i++) {
+            const x = enc.centerX + (Math.random() - 0.5) * 2 * halfW
+            const z = -4 - Math.random() * 5   // Z ∈ [−4, −9], well inside enclosure
+            const pos = new Vector3(x, baseY, z)
+            if (Math.hypot(pos.x - playerPos.x, pos.z - playerPos.z) >= minDist) return pos
+        }
+        return new Vector3(enc.centerX, baseY, -8)
+    }
+
+    /** Move an item to `pos`, keeping positions map and bobbing baseline in sync. */
+    private placeItem(type: string, pos: Vector3) {
+        this.itemPositions.set(type, pos)
+        this.itemBaseY.set(type, pos.y)
+        const mesh = this.itemMeshes.get(type)
+        if (mesh) mesh.position.copy(pos)
+    }
+
     private async loadItems() {
         await Promise.all(this.ld.items.map(async cfg => {
             const enc = this.ld.enclosures.find(e => e.id === cfg.enclosureId)
@@ -670,7 +692,12 @@ export default class GameScene extends Scene3D {
             const { onComplete } = phase
             if (onComplete.showItemType) {
                 const shownMesh = this.itemMeshes.get(onComplete.showItemType)
-                if (shownMesh) shownMesh.visible = true
+                if (shownMesh) {
+                    const itemCfg = this.ld.items.find(i => i.type === onComplete.showItemType)
+                    const enc = itemCfg && this.ld.enclosures.find(e => e.id === itemCfg.enclosureId)
+                    if (enc && itemCfg) this.placeItem(onComplete.showItemType, this.safeItemSpawnPos(enc, itemCfg.positionY))
+                    shownMesh.visible = true
+                }
                 this._activateTimerForCurrentPhase()
             } else if (onComplete.endGame) {
                 this.needsDrainActive = false
@@ -1102,7 +1129,11 @@ export default class GameScene extends Scene3D {
                 if (phase.enclosureId !== encId) continue
                 const itemCfg = this.ld.items.find(i => i.type === phase.requiredItem)
                 const mesh = this.itemMeshes.get(phase.requiredItem)
-                if (mesh && itemCfg?.startVisible !== false) mesh.visible = true
+                if (mesh && itemCfg?.startVisible !== false) {
+                    const enc = itemCfg && this.ld.enclosures.find(e => e.id === itemCfg.enclosureId)
+                    if (enc && itemCfg) this.placeItem(phase.requiredItem, this.safeItemSpawnPos(enc, itemCfg.positionY))
+                    mesh.visible = true
+                }
             }
         }
     }
@@ -1123,7 +1154,7 @@ export default class GameScene extends Scene3D {
             const {x, bottom} = this.scale.canvasBounds
             const joystick: JoyStick = new (JoyStick as any)(document.body)
             const axis = joystick.add.axis({
-                styles: {left: Math.round(x) + 40, bottom: Math.round(window.innerHeight - bottom) + 40, size: 130},
+                styles: {right: Math.round(x) + 40, bottom: Math.round(window.innerHeight - bottom) + 40, size: 130},
             })
             // The circle div is synchronously appended to body as its last child
             this.joystickEl = document.body.lastElementChild as HTMLElement
@@ -1499,8 +1530,13 @@ export default class GameScene extends Scene3D {
         // Ensure the current phase's item is visible
         const activePhaseCfg = this.phaseManager.current
         if (activePhaseCfg) {
+            const itemCfg = this.ld.items.find(i => i.type === activePhaseCfg.requiredItem)
+            const enc = itemCfg && this.ld.enclosures.find(e => e.id === itemCfg.enclosureId)
             const m = this.itemMeshes.get(activePhaseCfg.requiredItem)
-            if (m) m.visible = true
+            if (m) {
+                if (enc && itemCfg) this.placeItem(activePhaseCfg.requiredItem, this.safeItemSpawnPos(enc, itemCfg.positionY))
+                m.visible = true
+            }
         }
 
         // Reset needs for current animal to full

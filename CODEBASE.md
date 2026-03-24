@@ -5,6 +5,13 @@
 ---
 
 ## Table of Contents
+0. [Quick-Start Cookbook](#0-quick-start-cookbook)
+   - [Add a decorative 3D prop](#add-a-decorative-3d-prop)
+   - [Add a new pickup item & phase](#add-a-new-pickup-item--phase)
+   - [Move something in the world](#move-something-in-the-world)
+   - [Balance the game feel](#balance-the-game-feel)
+   - [Add or tweak a sound](#add-or-tweak-a-sound)
+   - [Tools that do the heavy lifting](#tools-that-do-the-heavy-lifting)
 1. [Project Bird's-Eye View](#1-projects-birds-eye-view)
 2. [Entry Point — `game.ts`](#2-entry-point--gamets)
 3. [The Data Contract — `LevelData.ts`](#3-the-data-contract--leveldatats)
@@ -30,6 +37,200 @@
    - 8.2 [Audio Config — `AudioConfig.ts`](#82-audio-config--audioconfigts)
 9. [Asset Map](#9-asset-map)
 10. [Remaining Improvement Points](#10-remaining-improvement-points)
+
+---
+
+## 0. Quick-Start Cookbook
+
+> **"How do I just…"** — practical recipes, no theory. For the why behind each system, see the numbered sections below.
+
+The golden rule: **almost everything is data-driven through `level.json`.** Start there before touching any TypeScript.
+
+---
+
+### Add a decorative 3D prop
+
+1. Drop your `.glb` into `src/assets/env/` (or any subfolder you like).
+2. Open `src/assets/level.json` and add an entry to the `"props"` array:
+
+```json
+{
+  "model":    "assets/env/my-bench.glb",
+  "position": { "x": 5, "y": 0, "z": -6 },
+  "rotation": { "y": 45 },
+  "scale":    1.2
+}
+```
+
+That's it. `loadProps()` picks it up automatically on the next `npm run start`. The `AssetLoader` deduplicates requests, so re-using the same model for multiple props costs only one GLB fetch.
+
+**Tip — Y position:** `y: 0` sits the pivot on the ground plane. If your model floats or clips, adjust `y` until it looks right; you don't need to change the GLB.
+
+---
+
+### Add a new pickup item & phase
+
+This is the most involved recipe but still purely data — no TypeScript required.
+
+**Step 1 — Assets**
+- Drop the item `.glb` into `src/assets/food/`
+- Drop a square icon `.png` into `src/assets/food/icons/`
+
+**Step 2 — Register the item in `level.json`**
+
+Add to the `"items"` array:
+```json
+{
+  "type":        "apple",
+  "enclosureId": "elephant",
+  "model":       "assets/food/apple.glb",
+  "scale":       1.5,
+  "positionY":   0.5,
+  "positionZ":   -1.5,
+  "bubbleIcon":  "icon-apple",
+  "iconAsset":   "assets/food/icons/apple.png",
+  "startVisible": true
+}
+```
+
+> `startVisible: false` hides the item until a phase's `onComplete.showItemType` reveals it (like the lion's turkey). Omit the field (or set `true`) for items visible from the start.
+
+**Step 3 — Add a phase in `level.json`**
+
+Add to the `"phases"` array:
+```json
+{
+  "id":           "elephant2",
+  "enclosureId":  "elephant",
+  "animalId":     "elephant",
+  "requiredItem": "apple",
+  "deliveryLabel": "🎁",
+  "deliveryIcon":  "icon-delivery-apple",
+  "deliveryIconAsset": "assets/ui/apple.png",
+  "onComplete": { "starsAwarded": 50, "nextPhase": "lion_toy" }
+}
+```
+
+Update the previous phase's `"nextPhase"` to point to `"elephant2"`, and you have a new step in the chain.
+
+**Icons are lazy-loaded** — `GameScene.create()` reads `iconAsset` and `deliveryIconAsset` fields and loads them automatically. No `preload()` edits needed.
+
+---
+
+### Move something in the world
+
+Everything lives in `level.json`. No need to recompile — just save and the dev server hot-reloads.
+
+| What to move | Field in `level.json` |
+|---|---|
+| Player start position | `player.startX`, `player.startZ` |
+| An enclosure left/right | `enclosures[n].centerX` |
+| A pickup item (depth in enclosure) | `items[n].positionZ` (more negative = deeper) |
+| A decorative prop | `props[n].position.x/y/z` |
+| Animal spawn depth | `animals[n].spawnZ` |
+| World movement boundaries | `world.bounds.xMin/xMax/zMin/zMax` |
+| Camera lead / trail distance | `constants.ts` → `CAMERA_OFFSET_X` (ahead), `CAMERA_OFFSET_Z` (behind) |
+| Camera height | `GameScene.updateCamera()` — the fixed `y = 5` line |
+
+**Coordinate system quick reference:**
+```
+        Z negative (into enclosures)
+             ↑
+  X negative ←  [path at Z=0]  → X positive
+             ↓
+        Z positive (behind player)
+
+  Fence front gate:  Z = -3
+  Fence back wall:   Z = -11
+  Player path:       Z =  0
+```
+
+---
+
+### Balance the game feel
+
+All tuning knobs, organised by what you're trying to fix:
+
+| Knob | Location | Effect |
+|---|---|---|
+| **Game speed** | | |
+| Player walk speed | `level.json` → `world.speed` | Higher = faster movement |
+| Camera catch-up | `constants.ts` → `CAMERA_LERP` | Higher = snappier follow |
+| **Timer** | | |
+| Active animal countdown | `level.json` → `world.timerDuration` | Seconds from full to 0 |
+| Idle animal slow drain | `constants.ts` → `NEEDS_IDLE_RATE` | Units/sec for non-active animals |
+| **Economy** | | |
+| Enclosure star cost | `level.json` → `enclosures[n].unlockCost` | Stars required to unlock |
+| Stars per delivery | `level.json` → `phases[n].onComplete.starsAwarded` | Stars given on completion |
+| **Animal AI** | | |
+| Wander area | `level.json` → `animals[n].wanderRadius` | How far from spawn they roam |
+| Walk speed | `level.json` → `animals[n].moveSpeed` | Units per second |
+| Anim blend speed | `constants.ts` → `ANIM_BLEND_RATE` | Higher = snappier idle↔walk transitions |
+| **Tutorial** | | |
+| Auto-dismiss delay | `level.json` → `tutorial.autoDismissMs` | Milliseconds before hint hides itself |
+| **Item pickup** | | |
+| Pickup radius | `constants.ts` → `AUTO_PICKUP_RADIUS` | World units — how close before auto-grab |
+| Interact range (bubbles) | `level.json` → `world.interactRange` | World units — bubble appears within this distance |
+
+---
+
+### Add or tweak a sound
+
+**Tweak an existing volume** — open `src/scripts/config/AudioConfig.ts` and change the relevant number. See §8.2 for the full table. This is the only file you need.
+
+**Add a new sound effect:**
+
+1. Drop the `.mp3` into `src/assets/audios/`
+2. Add a `this.load.audio(...)` call in `GameScene.preload()`:
+   ```typescript
+   this.load.audio('sfx-splash', 'assets/audios/splash.mp3')
+   ```
+3. (Optional but recommended) Add a volume entry to `AudioConfig.ts`:
+   ```typescript
+   sfx: {
+     // ... existing entries ...
+     splash: 0.8,
+   }
+   ```
+4. Play it anywhere in the scene:
+   ```typescript
+   this.sfx.playSfx('sfx-splash', { volume: AudioConfig.sfx.splash })
+   ```
+
+**Add background music:**
+```typescript
+// Swap the BGM mid-game:
+this.sfx.stopMusic(800)                             // fade out over 800ms
+this.sfx.playMusic('bgm-level2', { fadeIn: 1500 })  // fade in new track
+```
+
+**Audio rules to remember:**
+- Files must be `.mp3` — Phaser's MIME detection doesn't reliably handle `.mpeg`
+- Use `this.sfx` (your `SoundManager`), never `this.sound` directly — `this.sound` is Phaser's built-in and bypasses volume control and mute support
+- Looping footstep-style sounds: pre-create them as `this.sound.add('key', { loop: true })` and hold a reference, rather than using `playSfx`. This guarantees you can `.stop()` them (see §5.7 for why)
+
+---
+
+### Tools that do the heavy lifting
+
+These are the abstractions that mean you spend time on game design, not boilerplate:
+
+| Tool | What it handles for you |
+|---|---|
+| **`level.json`** | Entire level layout, phase rules, animal configs, timers, colors — edit JSON, no TypeScript needed |
+| **`AudioConfig.ts`** | All volumes in one place — change a number, every call site updates |
+| **`constants.ts`** | All magic numbers — camera lag, pickup radius, HUD sizes — one file |
+| **`AssetLoader`** | GLTF deduplication + error recovery — drop a path in, get a mesh back; broken GLBs fall back to a colored sphere automatically |
+| **`SoundManager`** | Music fades, SFX volume, mute toggle, audio context lock safety — just call `playSfx` / `playMusic` |
+| **`AnimalWander`** | Full wander AI + animation blending — add an animal to `level.json` and it moves and animates automatically |
+| **`normalizeAnimalHeight`** | GLBs from any source auto-scale to correct world height — no manual scale tuning per model |
+| **`safeItemSpawnPos`** | Rejection-sampling spawn — items never land on top of the player |
+| **`BubbleFactory`** | Action and purchase bubbles as one-liner calls — implement `Interactable`, call the factory, done |
+| **`projectToScreen`** | 3D → 2D coordinate bridge — any world position to a Phaser pixel in one call |
+| **`clampToScreenEdge`** | Off-screen indicator math — pass a world pos, get an edge-clamped position + arrow angle back |
+| **Phaser Tweens** (`this.tweens.add`) | All 2D animation (pop-in, slide, bounce, fade) — no manual easing math |
+| **`this.third.warpSpeed`** | Three.js scene bootstrap (renderer, lights, shadow maps) in one call — `-name` flags skip parts you don't need |
+| **`PhaseManager`** | Phase state machine with null-safety — `current`, `isDone`, `advance()` replace scattered string comparisons |
 
 ---
 

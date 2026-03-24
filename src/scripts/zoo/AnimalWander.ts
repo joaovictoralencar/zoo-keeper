@@ -1,8 +1,7 @@
 import { AnimationAction, Group, Vector3 } from 'three'
 
 /**
- * Kinematic wander behaviour for animals that have no idle animation.
- * Ported from the PlayCanvas AnimalWander script.
+ * Kinematic wander behaviour for zoo animals.
  *
  * Usage:
  *   const wander = new AnimalWander(mesh, { wanderRadius: 3, moveSpeed: 1.5 })

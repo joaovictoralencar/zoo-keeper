@@ -36,28 +36,29 @@
   },
 
   "enclosures": [
-    { "id": "monkey",   "phase": "monkey",   "centerX": -15, "width": 10, "unlockCost": 0  },
-    { "id": "elephant", "phase": "elephant", "centerX":   0, "width": 10, "unlockCost": 25 },
-    { "id": "lion",     "phase": "lion_toy", "centerX":  15, "width": 10, "unlockCost": 75, "unlockRequires": "elephant" }  ],
+    { "id": "monkey",   "centerX": -15, "width": 10, "unlockCost": 0  },
+    { "id": "elephant", "centerX":   0, "width": 10, "unlockCost": 25 },
+    { "id": "lion",     "centerX":  15, "width": 10, "unlockCost": 75, "unlockRequires": "elephant" }
+  ],
 
   "animals": [
     {
       "id": "monkey",   "enclosureId": "monkey",
       "model": "assets/pets/animal-monkey.glb",
       "spawnZ": -6, "targetHeight": 0.7, "count": 5,
-      "startLocked": false, "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐒"
+      "startLocked": false, "wanderRadius": 2, "moveSpeed": 1.2
     },
     {
       "id": "elephant", "enclosureId": "elephant",
       "model": "assets/pets/animal-elephant.glb",
       "spawnZ": -6, "spawnY": 0, "targetHeight": 1.7, "count": 3,
-      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🐘"
+      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2
     },
     {
       "id": "lion",     "enclosureId": "lion",
       "model": "assets/pets/animal-lion.glb",
       "spawnZ": -7, "spawnY": 0, "targetHeight": 1.0, "scale": 1.2,
-      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2, "emoji": "🦁"
+      "startLocked": true,  "wanderRadius": 2, "moveSpeed": 1.2
     }
   ],
 
