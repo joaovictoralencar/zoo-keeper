@@ -9,7 +9,7 @@
 
   "camera": {
     "lerp":      0.1,
-    "offsetX":   2,
+    "offsetX":   0.5,
     "offsetZ":   6,
     "positionY": 6,
     "lookAtY":  2.5

@@ -97,6 +97,7 @@ export default class GameScene extends Scene3D {
 
     // ── Pickup arrows (replaces tap bubbles for items) ─────────────────────
     private pickupArrows = new Map<string, Phaser.GameObjects.Image>()
+    private enclosureGuideArrow: Phaser.GameObjects.Image | null = null
 
     // ── Prestige bar ───────────────────────────────────────────────────────
     private prestigeBarGfx: Phaser.GameObjects.Graphics | null = null
@@ -260,6 +261,7 @@ export default class GameScene extends Scene3D {
         this.updateCamera()
         this.updateAutoPickup()
         this.updatePickupArrows()
+        this.updateEnclosureGuideArrow()
         this.updateBubbles()
         this.updateAnimalHud()
         this.updateNeeds(dt)
@@ -665,10 +667,10 @@ export default class GameScene extends Scene3D {
         }, this)
 
         // 2. Visual FX — success bounce + hearts burst
-        this.events.on('delivery:success', ({ groups, group }: DeliveryPayload) => {
+        this.events.on('delivery:success', ({ groups, enc }: DeliveryPayload) => {
             for (const g of groups) this.successEffect(g)
-            if (group) {
-                const sp = this.project(new Vector3(group.position.x, group.position.y + 2, group.position.z))
+            if (enc) {
+                const sp = this.project(new Vector3(enc.centerX, 2.5, -7))
                 this.spawnHearts(sp.x, sp.y)
             }
         }, this)
@@ -846,8 +848,8 @@ export default class GameScene extends Scene3D {
 
         // Milestones: animal silhouettes sit ON the bar; star reward below
         const milestoneData = [
-            {id: 'monkey',   ratio: 1 / 3, stars: 50,  icon: 'ui-monkey'},
-            {id: 'elephant', ratio: 2 / 3, stars: 100, icon: 'ui-elephant'},
+            {id: 'elephant', ratio: 1 / 3, stars: 50,  icon: 'ui-elephant'},
+            {id: 'lion',     ratio: 2 / 3, stars: 100, icon: 'ui-lion'},
             {id: 'gift',     ratio: 1.0,   stars: 150, icon: 'ui-gift'},
         ]
         const iconSize  = Math.round(bH * 2)
@@ -1207,6 +1209,7 @@ export default class GameScene extends Scene3D {
         this.createAnimalHudItems()
         this.setupStarHud()
         this.createPickupArrows()
+        this.createEnclosureGuideArrow()
     }
 
     // ── TUTORIAL ─────────────────────────────────────────────────────────
@@ -1270,6 +1273,63 @@ export default class GameScene extends Scene3D {
             })
             this.pickupArrows.set(phase.requiredItem, arrow)
         }
+    }
+
+    private createEnclosureGuideArrow() {
+        this.enclosureGuideArrow = this.add.image(0, 0, 'ui-arrow')
+            .setDisplaySize(48, 48)
+            .setDepth(33)
+            .setAlpha(0)
+            .setOrigin(0.5)
+        this.tweens.add({
+            targets: this.enclosureGuideArrow,
+            scaleX: 1.25, scaleY: 1.25,
+            duration: 400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+        })
+    }
+
+    private updateEnclosureGuideArrow() {
+        const arrow = this.enclosureGuideArrow
+        if (!arrow || !this.player) { arrow?.setAlpha(0); return }
+
+        // Find the next enclosure: locked, prereqs met, and player can currently afford it
+        const nextEnc = this.ld.enclosures.find(enc =>
+            (enc.unlockCost ?? 0) > 0 &&
+            !this.purchasedEnclosures.has(enc.id) &&
+            (!enc.unlockRequires || this.purchasedEnclosures.has(enc.unlockRequires)) &&
+            this.starCount >= enc.unlockCost
+        )
+
+        if (!nextEnc) { arrow.setAlpha(0); return }
+
+        // Hide when close enough that the purchase bubble is already visible
+        const dx = this.player.position.x - nextEnc.centerX
+        const dz = this.player.position.z - this.ld.fence.zFront
+        if (Math.hypot(dx, dz) < this.ld.world.interactRange + 1) {
+            arrow.setAlpha(0)
+            return
+        }
+
+        // Project player and gate into 2D screen space
+        const pp = this.player.position
+        const playerScreen = this.project(new Vector3(pp.x, pp.y + 1.5, pp.z))
+        const gateScreen   = this.project(new Vector3(nextEnc.centerX, 0, this.ld.fence.zFront))
+
+        // Angle from player to gate in screen space, then orbit the arrow around the player
+        const angleDeg = Math.atan2(
+            gateScreen.y - playerScreen.y,
+            gateScreen.x - playerScreen.x,
+        ) * (180 / Math.PI)
+        const rad = angleDeg * (Math.PI / 180)
+        const ORBIT_R = 65
+
+        arrow
+            .setPosition(
+                playerScreen.x + Math.cos(rad) * ORBIT_R,
+                playerScreen.y + Math.sin(rad) * ORBIT_R,
+            )
+            .setAngle(angleDeg - 90)  // arrow image points down at 0°; -90 aligns it to atan2
+            .setAlpha(1)
     }
 
     private updateAutoPickup() {
