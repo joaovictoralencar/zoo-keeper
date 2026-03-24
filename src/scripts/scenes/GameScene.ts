@@ -1182,7 +1182,7 @@ export default class GameScene extends Scene3D {
         if (!tut) return
 
         // Joystick sits at bottom-left; position hint just above and to the right of it
-        const tx = 190, ty = GAME_H - 190
+        const tx = 435, ty = GAME_H - 250
 
         const handIcon = this.add.image(0, 0, 'ui-pointer').setDisplaySize(40, 40).setOrigin(0.5)
         const label = this.add.text(0, 38, 'SWIPE', {
@@ -1466,22 +1466,22 @@ export default class GameScene extends Scene3D {
         // Broken star — punches in above panel top
         const starY = panelY - PANEL_H / 2 + 10
         const brokenStar = this.add.image(cx, starY, 'ui-broken-star')
-            .setDisplaySize(190, 190).setOrigin(0.5).setDepth(D + 3).setScale(0)
+            .setDisplaySize(260, 260).setOrigin(0.5).setDepth(D + 3).setScale(0)
 
         // Title — red, punchy failure copy
-        const title = this.add.text(cx, panelY - 40, "YOU'RE FIRED!", {
+        const title = this.add.text(cx, panelY-80, "YOU'RE FIRED!", {
             fontSize: '40px', color: '#e53935', fontStyle: 'bold', fontFamily: FONT,
             stroke: '#ffffff', strokeThickness: 4,
         }).setOrigin(0.5).setDepth(D + 2).setAlpha(0)
 
         // Subtitle — white, shame-inducing
-        const subtitle = this.add.text(cx, panelY + 50, "YOUR ANIMALS\nNEED YOU.", {
+        const subtitle = this.add.text(cx, panelY, "YOUR ANIMALS\nNEED YOU.", {
             fontSize: '24px', color: '#ffffff', fontStyle: 'bold', fontFamily: FONT,
             align: 'center', stroke: '#000000', strokeThickness: 4,
         }).setOrigin(0.5).setDepth(D + 2).setAlpha(0)
 
         // Try Again button
-        const btnY = panelY + PANEL_H / 2 - 58
+        const btnY = panelY + PANEL_H / 2 - 70
         const btnImg = this.add.image(cx, btnY, 'ui-button-red')
             .setDisplaySize(290, 70).setOrigin(0.5).setDepth(D + 2).setAlpha(0).setInteractive()
         const btnText = this.add.text(cx, btnY, 'TRY AGAIN', {
