@@ -9,7 +9,7 @@
   "dependencies": {
     "@enable3d/phaser-extension": "0.26.1",
     "matter-js": "0.17.1",
-    "phaser": "3.88.2",
+    "phaser": "^3.90.0",
     "poly-decomp": "^0.3.0",
     "three": "0.171.0"
   },

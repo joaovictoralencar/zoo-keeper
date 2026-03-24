@@ -102,6 +102,32 @@ function toDataUri(fullPath) {
   return `data:${mime};base64,` + data.toString('base64')
 }
 
+const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav'])
+const GLB_EXTS   = new Set(['.glb'])
+
+/**
+ * Builds a unified XHR + fetch shim for binary assets (audio + GLBs).
+ *
+ * Audio (Phaser WebAudio): uses XMLHttpRequest with a relative path.
+ *   → XHR shim matches by exact key.
+ *
+ * GLBs (Three.js FileLoader): uses fetch() with a Request object whose
+ *   .url property is the already-resolved absolute file:/// URL.
+ *   Chrome blocks that request with a CORS error before it reaches the
+ *   network, so we must intercept before fetch() is called and return a
+ *   synthetic Response from the shimMap data.
+ *   → fetch shim matches by suffix ('/'+key) to handle both relative and
+ *     absolute URL forms.
+ *
+ * Phaser 3.88+ reads e.target inside its XHR onload handler, so we pass
+ * { target: self } to satisfy that lookup.
+ */
+function buildBinaryShim(shimMap) {
+  if (Object.keys(shimMap).length === 0) return ''
+  const json = JSON.stringify(shimMap)
+  return `(function(){var __ad=${json};var _f=window.fetch,_o=XMLHttpRequest.prototype.open,_s=XMLHttpRequest.prototype.send;window.fetch=function(u,o){var url=typeof u==='string'?u:(u instanceof Request?u.url:String(u));var mk=null;for(var k in __ad){if(url===k||url.endsWith('/'+k)){mk=k;break;}}if(mk){var b64=__ad[mk];var raw=atob(b64);var buf=new ArrayBuffer(raw.length);var v=new Uint8Array(buf);for(var i=0;i<raw.length;i++)v[i]=raw.charCodeAt(i);return Promise.resolve(new Response(buf,{status:200,headers:{'Content-Type':'application/octet-stream'}}));}return _f.apply(this,arguments);};XMLHttpRequest.prototype.open=function(m,u){this.__au=(__ad[u]!==undefined?u:null);return _o.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){var self=this;if(self.__au){var b64=__ad[self.__au];var raw=atob(b64);var buf=new ArrayBuffer(raw.length);var v=new Uint8Array(buf);for(var i=0;i<raw.length;i++)v[i]=raw.charCodeAt(i);setTimeout(function(){Object.defineProperty(self,'readyState',{get:function(){return 4},configurable:true});Object.defineProperty(self,'status',{get:function(){return 200},configurable:true});Object.defineProperty(self,'response',{get:function(){return buf},configurable:true});if(self.onreadystatechange)self.onreadystatechange({target:self,type:'readystatechange'});if(self.onload)self.onload({target:self,type:'load'});},0);return;}return _s.apply(this,arguments);};})();`
+}
+
 console.log('📦  Building standalone.html...\n')
 
 // ── 1. Read dist/index.html ───────────────────────────────────────────────
@@ -130,16 +156,42 @@ let js = bundles
 
 let inlined = 0
 
+// Unified shim map — populated by steps 4 and 5, consumed in step 6.
+// Keys are the original relative asset paths (e.g. "assets/audios/bgm.mp3",
+// "assets/env/graveyard/pine.glb").  Values are base64-encoded binary data.
+// Each unique asset is stored exactly once regardless of how many times it
+// is referenced in level.json or the JS bundles.
+const shimMap = {}
+
 // ── 4. Pre-process level.json ─────────────────────────────────────────────
-// Asset paths (GLBs, icons, etc.) come from level.json at runtime, so they
-// won't appear as string literals in the JS bundle. We replace them inside
-// the JSON before encoding it, so the game receives data URIs directly.
+// Small assets (icons/images) referenced in level.json are loaded by Phaser's
+// image loader via <img> src, so they must be data URIs.  GLBs are loaded by
+// Three.js via XHR — they go through the binary shim instead, keeping the
+// original path in the JSON.  This avoids double-base64-encoding every prop
+// model (e.g. pine.glb would otherwise be embedded 8 times).
 const levelJsonDisk = path.join(DIST, 'assets', 'level.json')
 if (fs.existsSync(levelJsonDisk)) {
   let levelJson = fs.readFileSync(levelJsonDisk, 'utf8')
 
   levelJson = levelJson.replace(/"(assets\/[^"]+)"/g, (match, assetPath) => {
-    const uri = toDataUri(path.join(DIST, assetPath))
+    const ext      = path.extname(assetPath).toLowerCase()
+    const fullPath = path.join(DIST, assetPath)
+
+    if (GLB_EXTS.has(ext)) {
+      // Store each unique GLB once in the shim; keep the original path in JSON
+      if (!shimMap[assetPath]) {
+        if (!fs.existsSync(fullPath)) { console.warn('  ⚠  Missing GLB: ' + assetPath); return match }
+        const data = processGlb(fullPath)
+        shimMap[assetPath] = data.toString('base64')
+        const kb = (data.length / 1024).toFixed(1)
+        console.log('  ▲  ' + assetPath + '  (' + kb + ' KB)  [GLB shim]')
+        inlined++
+      }
+      return match // keep path as-is so Three.js XHR request matches shim key
+    }
+
+    // Small assets (PNG icons, etc.) — embed directly as data URI in JSON
+    const uri = toDataUri(fullPath)
     if (!uri) return match
     const kb = (uri.length * 0.75 / 1024).toFixed(1)
     console.log('  ✓  ' + assetPath + '  (' + kb + ' KB)  [via level.json]')
@@ -150,7 +202,7 @@ if (fs.existsSync(levelJsonDisk)) {
   const modB64   = Buffer.from(levelJson).toString('base64')
   const levelUri = 'data:application/json;base64,' + modB64
   js = js.split('assets/level.json').join(levelUri)
-  console.log('  ✓  assets/level.json  (with all sub-assets pre-inlined)')
+  console.log('  ✓  assets/level.json  (icons embedded; GLBs via shim)')
   inlined++
 }
 
@@ -159,8 +211,30 @@ const assetDir  = path.join(DIST, 'assets')
 const allAssets = fs.existsSync(assetDir) ? walk(assetDir) : []
 
 for (const rel of allAssets) {
+  const ext       = path.extname(rel).toLowerCase()
   const assetPath = 'assets/' + rel
   if (!js.includes(assetPath)) continue
+
+  if (AUDIO_EXTS.has(ext)) {
+    const fullPath = path.join(assetDir, rel)
+    shimMap[assetPath] = fs.readFileSync(fullPath).toString('base64')
+    const kb = (fs.statSync(fullPath).size / 1024).toFixed(1)
+    console.log('  ♪  ' + assetPath + '  (' + kb + ' KB)  [audio shim]')
+    inlined++
+    continue
+  }
+
+  if (GLB_EXTS.has(ext)) {
+    // May already be in shimMap from the level.json step; don't double-add
+    if (!shimMap[assetPath]) {
+      const data = processGlb(path.join(assetDir, rel))
+      shimMap[assetPath] = data.toString('base64')
+      const kb = (data.length / 1024).toFixed(1)
+      console.log('  ▲  ' + assetPath + '  (' + kb + ' KB)  [GLB shim, direct ref]')
+      inlined++
+    }
+    continue // path stays as-is in JS; shim handles the XHR request
+  }
 
   const uri = toDataUri(path.join(assetDir, rel))
   if (!uri) continue
@@ -178,6 +252,8 @@ console.log('\nInlined ' + inlined + ' asset(s).')
 js = js.replace(/<\//g, '<\\/')
 
 // ── 6. Build the standalone HTML ──────────────────────────────────────────
+const binaryShim = buildBinaryShim(shimMap)
+
 let out = html
 for (const b of bundles) out = out.replace(b.tag, '')
 // Use the last </body> to be safe, and place script right before it.
@@ -186,7 +262,7 @@ if (bodyCloseIdx === -1) {
   console.error('❌  Could not find </body> in index.html')
   process.exit(1)
 }
-out = out.slice(0, bodyCloseIdx) + '<script>\n' + js + '\n</script>\n</body>' + out.slice(bodyCloseIdx + '</body>'.length)
+out = out.slice(0, bodyCloseIdx) + '<script>\n' + (binaryShim ? binaryShim + '\n' : '') + js + '\n</script>\n</body>' + out.slice(bodyCloseIdx + '</body>'.length)
 
 // ── 7. Write output ───────────────────────────────────────────────────────
 fs.writeFileSync(OUTPUT, out, 'utf8')
