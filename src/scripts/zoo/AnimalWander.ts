@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three'
+import { AnimationAction, Group, Vector3 } from 'three'
 
 /**
  * Kinematic wander behaviour for animals that have no idle animation.
@@ -22,6 +22,11 @@ export interface AnimalWanderConfig {
   zMax?: number
 }
 
+export interface AnimalAnimPair {
+  staticAction: AnimationAction
+  walkAction:   AnimationAction
+}
+
 export class AnimalWander {
   private readonly entity: Group
   private readonly origin: Vector3
@@ -42,7 +47,12 @@ export class AnimalWander {
   private readonly zMin: number
   private readonly zMax: number
 
-  constructor(entity: Group, config: AnimalWanderConfig = {}) {
+  private readonly anims: AnimalAnimPair | null
+  /** 0 = full idle, 1 = full walk */
+  private animBlend = 0
+  private static readonly BLEND_RATE = 6
+
+  constructor(entity: Group, config: AnimalWanderConfig = {}, anims?: AnimalAnimPair) {
     this.entity = entity
     this.origin = entity.position.clone()
     this.baseY = this.origin.y
@@ -57,6 +67,13 @@ export class AnimalWander {
     this.zMin = config.zMin ?? -Infinity
     this.zMax = config.zMax ??  Infinity
 
+    this.anims = anims ?? null
+    if (anims) {
+      anims.staticAction.play()
+      anims.walkAction.play()
+      anims.walkAction.weight = 0
+    }
+
     this.pickNewTarget()
   }
 
@@ -70,7 +87,6 @@ export class AnimalWander {
     let angle: number
 
     if (towardOrigin && towardOrigin.lengthSq() > 0.001) {
-      // Boundary hit — bounce back toward origin with some randomness
       const baseAngle = Math.atan2(towardOrigin.x, towardOrigin.z)
       angle = baseAngle + (Math.random() - 0.5) * Math.PI
     } else {
@@ -101,50 +117,51 @@ export class AnimalWander {
       this.entity.position.set(pos.x, this.baseY + bounce, pos.z)
 
       if (this.waitTimer <= 0) this.pickNewTarget()
-      return
-    }
+    } else {
+      // ── MOVING: walk toward target ───────────────────────────────────────────
+      if (!this.target) { this.pickNewTarget(); return }
 
-    // ── MOVING: walk toward target ───────────────────────────────────────────
-    if (!this.target) { this.pickNewTarget(); return }
-
-    // Radius boundary check (replaces physics wall detection)
-    const distFromOrigin = new Vector3(
-      pos.x - this.origin.x,
-      0,
-      pos.z - this.origin.z
-    )
-    if (distFromOrigin.length() > this.wanderRadius) {
-      this.pickNewTarget(new Vector3(
-        this.origin.x - pos.x,
+      const distFromOrigin = new Vector3(
+        pos.x - this.origin.x,
         0,
-        this.origin.z - pos.z
-      ))
-      return
+        pos.z - this.origin.z
+      )
+      if (distFromOrigin.length() > this.wanderRadius) {
+        this.pickNewTarget(new Vector3(
+          this.origin.x - pos.x,
+          0,
+          this.origin.z - pos.z
+        ))
+        return
+      }
+
+      const dir = new Vector3(
+        this.target.x - pos.x,
+        0,
+        this.target.z - pos.z
+      )
+      const dist = dir.length()
+
+      if (dist < 0.2) {
+        this.waiting    = true
+        this.waitTimer  = this.waitTime + Math.random() * 1.5
+        this.jumpTime   = 0
+        this.baseY      = pos.y
+      } else {
+        dir.normalize()
+        const nx = Math.max(this.xMin, Math.min(this.xMax, pos.x + dir.x * this.moveSpeed * dt))
+        const nz = Math.max(this.zMin, Math.min(this.zMax, pos.z + dir.z * this.moveSpeed * dt))
+        this.entity.position.set(nx, this.baseY, nz)
+        this.entity.rotation.y = Math.atan2(dir.x, dir.z)
+      }
     }
 
-    const dir = new Vector3(
-      this.target.x - pos.x,
-      0,
-      this.target.z - pos.z
-    )
-    const dist = dir.length()
-
-    if (dist < 0.2) {
-      // Reached waypoint — enter wait state
-      this.waiting    = true
-      this.waitTimer  = this.waitTime + Math.random() * 1.5
-      this.jumpTime   = 0
-      this.baseY      = pos.y
-      return
+    // ── ANIMATION BLEND (if anims provided) ─────────────────────────────────
+    if (this.anims) {
+      const target = this.isMoving ? 1 : 0
+      this.animBlend += (target - this.animBlend) * AnimalWander.BLEND_RATE * dt
+      this.anims.staticAction.weight = 1 - this.animBlend
+      this.anims.walkAction.weight   = this.animBlend
     }
-
-    dir.normalize()
-
-    const nx = Math.max(this.xMin, Math.min(this.xMax, pos.x + dir.x * this.moveSpeed * dt))
-    const nz = Math.max(this.zMin, Math.min(this.zMax, pos.z + dir.z * this.moveSpeed * dt))
-    this.entity.position.set(nx, this.baseY, nz)
-
-    // Rotate to face movement direction
-    this.entity.rotation.y = Math.atan2(dir.x, dir.z)
   }
 }

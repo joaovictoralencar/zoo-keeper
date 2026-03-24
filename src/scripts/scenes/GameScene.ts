@@ -1,15 +1,22 @@
 import {Scene3D, JoyStick} from '@enable3d/phaser-extension'
 import {
-    AnimationAction, Box3, Color, CylinderGeometry, Group, MathUtils,
+    AnimationAction, AnimationMixer, Box3, Color, CylinderGeometry, Group, MathUtils,
     Mesh, MeshBasicMaterial, MeshLambertMaterial,
     PerspectiveCamera, PlaneGeometry, SphereGeometry, Vector3,
 } from 'three'
-import {AnimalWander} from '../zoo/AnimalWander'
+import {AnimalWander, AnimalAnimPair} from '../zoo/AnimalWander'
 import type {LevelData, AnimalConfig, EnclosureConfig} from '../types/LevelData'
-
-const GAME_W = 540
-const GAME_H = 960
-const FONT = '"Baloo 2", sans-serif'
+import {
+    GAME_W, GAME_H, FONT,
+    ACTION_BUBBLE_W, ACTION_BUBBLE_H, PURCHASE_BUBBLE_W, PURCHASE_BUBBLE_H, BUBBLE_RADIUS,
+    CAMERA_LERP, CAMERA_OFFSET_X, CAMERA_OFFSET_Z,
+    AUTO_PICKUP_RADIUS, CARRY_ITEM_HEIGHT,
+    HUD_RING_RADIUS, HUD_EDGE_MARGIN, HUD_TOP_MARGIN,
+    NEEDS_IDLE_RATE,
+} from '../constants'
+import { projectToScreen, clampToScreenEdge } from '../utils/WorldUI'
+import { createActionBubble, createPurchaseBubble } from '../ui/BubbleFactory'
+import { AssetLoader } from '../utils/AssetLoader'
 
 function parseHex(s: string): number {
     return parseInt(s.replace('#', '0x'), 16)
@@ -33,12 +40,13 @@ interface CarriedItem {
 export default class GameScene extends Scene3D {
     // ── level data ────────────────────────────────────────────────────────
     private ld!: LevelData
+    private assetLoader!: AssetLoader
 
     // ── movement ─────────────────────────────────────────────────────────
     private moveData = {top: 0, right: 0}
     private joystickEl: HTMLElement | null = null
-    private player: any = null
-    private mixer: any = null
+    private player: Group | null = null
+    private mixer: AnimationMixer | null = null
     private idleAction: AnimationAction | null = null
     private walkAction: AnimationAction | null = null
     private isMoving = false
@@ -133,6 +141,7 @@ export default class GameScene extends Scene3D {
 
     async create() {
         this.ld = this.cache.json.get('level') as LevelData
+        this.assetLoader = new AssetLoader(this.third)
 
         // Kick off font load (non-blocking — falls back to system font immediately)
         document.fonts.load(`700 16px "Baloo 2"`).catch(() => {})
@@ -165,11 +174,15 @@ export default class GameScene extends Scene3D {
         this.third.scene.background = new Color(parseHex(this.ld.environment.skyColor))
 
         this.buildEnvironment()
-        await this.loadFences()
-        await this.loadPlayer()
-        await this.loadAnimals()
-        await this.loadItems()
-        await this.loadProps()
+
+        // Load all 3D assets in parallel
+        await Promise.all([
+            this.loadFences(),
+            this.loadPlayer(),
+            this.loadAnimals(),
+            this.loadItems(),
+            this.loadProps(),
+        ])
 
         // Init per-animal needs to full for all animals
         for (const animal of this.ld.animals) {
@@ -207,16 +220,8 @@ export default class GameScene extends Scene3D {
         this.updateAnimalHud()
         this.updateNeeds(dt)
 
-        for (const [id, w] of this.animalWanders) {
+        for (const [, w] of this.animalWanders) {
             w.update(dt)
-            const anim = this.animalMixers.get(id)
-            if (anim) {
-                const target = w.isMoving ? 1 : 0
-                const cur = anim.walkAction.getEffectiveWeight()
-                const next = cur + (target - cur) * Math.min(1, dt * 6)
-                anim.walkAction.setEffectiveWeight(next)
-                anim.staticAction.setEffectiveWeight(1 - next)
-            }
         }
     }
 
@@ -254,89 +259,85 @@ export default class GameScene extends Scene3D {
     }
 
     private async loadFences() {
-        const f = this.ld.fence
-        try {
-            const gltf     = await this.third.load.gltf(f.model)
-            const template = gltf.scene
+        const f    = this.ld.fence
+        const gltf = await this.assetLoader.loadGltf(f.model)
+        if (!gltf) return
 
-            // Measure GLB pivot offset in Z — the mesh is NOT centered at Z=0.
-            // For this iron-fence GLB: geometry sits at Z ∈ [-0.4, -0.25], pivot = -0.325.
-            // For front/back rows: rot=0, local Z → world Z, correct with -pivZ.
-            // For side cols rot +90°: local Z → world +X, correct placed X with -pivZ.
-            // For side cols rot -90°: local Z → world -X, correct placed X with +pivZ.
-            const bounds = new Box3().setFromObject(template)
-            const pivZ   = (bounds.min.z + bounds.max.z) / 2
+        const template = gltf.scene
 
-            const countW   = Math.round((f.halfWidth * 2) / f.segmentWidth)
-            const countD   = Math.round(Math.abs(f.zBack - f.zFront) / f.segmentWidth)
-            const midPanel = Math.floor(countW / 2)
+        // Measure GLB pivot offset in Z — the mesh is NOT centered at Z=0.
+        const bounds = new Box3().setFromObject(template)
+        const pivZ   = (bounds.min.z + bounds.max.z) / 2
 
-            for (const enc of this.ld.enclosures) {
-                const ex = enc.centerX
-                const zF = f.zFront - pivZ
-                const zB = f.zBack  - pivZ
-                const xW = ex - f.halfWidth - pivZ
-                const xE = ex + f.halfWidth + pivZ
+        const countW   = Math.round((f.halfWidth * 2) / f.segmentWidth)
+        const countD   = Math.round(Math.abs(f.zBack - f.zFront) / f.segmentWidth)
+        const midPanel = Math.floor(countW / 2)
 
-                // South row — skip gate panels
-                for (let i = 0; i < countW; i++) {
-                    const isGate = i >= midPanel - f.gatePanels / 2 && i < midPanel + f.gatePanels / 2
-                    if (isGate) continue
-                    const s = template.clone(true)
-                    s.position.set(ex - f.halfWidth + f.segmentWidth * 0.5 + i * f.segmentWidth, 0, zF)
-                    this.third.scene.add(s)
-                }
-                // North row (full)
-                for (let i = 0; i < countW; i++) {
-                    const s = template.clone(true)
-                    s.position.set(ex - f.halfWidth + f.segmentWidth * 0.5 + i * f.segmentWidth, 0, zB)
-                    this.third.scene.add(s)
-                }
-                // Side columns — countD panels, starting half a segment inside the front row,
-                // so panels fill exactly [zFront, zBack] with no protrusion past the fence rows.
-                for (let i = 0; i < countD; i++) {
-                    const z = f.zFront - f.segmentWidth / 2 - i * f.segmentWidth
-                    const l = template.clone(true)
-                    l.position.set(xW, 0, z)
-                    l.rotation.y = Math.PI / 2
-                    this.third.scene.add(l)
+        for (const enc of this.ld.enclosures) {
+            const ex = enc.centerX
+            const zF = f.zFront - pivZ
+            const zB = f.zBack  - pivZ
+            const xW = ex - f.halfWidth - pivZ
+            const xE = ex + f.halfWidth + pivZ
 
-                    const r = template.clone(true)
-                    r.position.set(xE, 0, z)
-                    r.rotation.y = -Math.PI / 2
-                    this.third.scene.add(r)
-                }
+            // South row — skip gate panels
+            for (let i = 0; i < countW; i++) {
+                const isGate = i >= midPanel - f.gatePanels / 2 && i < midPanel + f.gatePanels / 2
+                if (isGate) continue
+                const s = template.clone(true)
+                s.position.set(ex - f.halfWidth + f.segmentWidth * 0.5 + i * f.segmentWidth, 0, zF)
+                this.third.scene.add(s)
             }
-        } catch {
-            console.warn('fence model not available:', f.model)
+            // North row (full)
+            for (let i = 0; i < countW; i++) {
+                const s = template.clone(true)
+                s.position.set(ex - f.halfWidth + f.segmentWidth * 0.5 + i * f.segmentWidth, 0, zB)
+                this.third.scene.add(s)
+            }
+            // Side columns
+            for (let i = 0; i < countD; i++) {
+                const z = f.zFront - f.segmentWidth / 2 - i * f.segmentWidth
+                const l = template.clone(true)
+                l.position.set(xW, 0, z)
+                l.rotation.y = Math.PI / 2
+                this.third.scene.add(l)
+
+                const r = template.clone(true)
+                r.position.set(xE, 0, z)
+                r.rotation.y = -Math.PI / 2
+                this.third.scene.add(r)
+            }
         }
     }
 
     // ── CHARACTER ────────────────────────────────────────────────────────
 
     private async loadPlayer() {
-        const cfg = this.ld.player
-        const gltf = await this.third.load.gltf(cfg.model)
-        this.player = gltf.scene
-        this.player.scale.setScalar(cfg.scale)
-        this.player.position.set(cfg.startX, 0, cfg.startZ)
-        this.player.traverse((c: any) => {
+        const cfg  = this.ld.player
+        const gltf = await this.assetLoader.loadGltf(cfg.model)
+        if (!gltf) return
+        const player = gltf.scene
+        this.player  = player
+        player.scale.setScalar(cfg.scale)
+        player.position.set(cfg.startX, 0, cfg.startZ)
+        player.traverse((c: any) => {
             if (c.isMesh) {
                 c.castShadow = true;
                 c.receiveShadow = true
             }
         })
-        this.third.scene.add(this.player)
+        this.third.scene.add(player)
 
-        this.mixer = this.third.animationMixers.create(this.player)
+        const mixer = this.third.animationMixers.create(player)
+        this.mixer = mixer
         const idleClip = gltf.animations.find((a: any) => a.name === 'idle')
         const walkClip = gltf.animations.find((a: any) => a.name === 'walk')
         if (idleClip) {
-            this.idleAction = this.mixer.clipAction(idleClip);
+            this.idleAction = mixer.clipAction(idleClip);
             this.idleAction!.play()
         }
         if (walkClip) {
-            this.walkAction = this.mixer.clipAction(walkClip)
+            this.walkAction = mixer.clipAction(walkClip)
         }
     }
 
@@ -354,12 +355,14 @@ export default class GameScene extends Scene3D {
             for (let k = 0; k < n; k++) queue.push({ cfg, enc, idx: k })
         }
 
-        const gltfs = await Promise.all(queue.map(q => this.third.load.gltf(q.cfg.model)))
+        const gltfs = await this.assetLoader.loadManyGltf(queue.map(q => q.cfg.model))
 
         gltfs.forEach((gltf, qi) => {
+            if (!gltf) return
             const { cfg, enc, idx } = queue[qi]
             const n = cfg.count ?? 1
-            const group = gltf.scene
+            // Clone so each animal instance is an independent scene graph node
+            const group = gltf.scene.clone(true)
 
             // Spread X across enclosure width, alternate Z for visual variety
             const xMin = enc.zoneXMin + 2, xMax = enc.zoneXMax - 2
@@ -377,6 +380,18 @@ export default class GameScene extends Scene3D {
 
             // Wander + animation keyed by `id_idx` so all instances update independently
             const wanderKey = `${cfg.id}_${idx}`
+
+            let animPair: AnimalAnimPair | undefined
+            const mixer = this.third.animationMixers.create(group)
+            const staticClip = gltf.animations.find((a: any) => a.name === 'static')
+            const walkClip   = gltf.animations.find((a: any) => a.name === 'walk')
+            if (staticClip && walkClip) {
+                animPair = {
+                    staticAction: mixer.clipAction(staticClip),
+                    walkAction:   mixer.clipAction(walkClip),
+                }
+            }
+
             this.animalWanders.set(wanderKey, new AnimalWander(group, {
                 wanderRadius: cfg.wanderRadius,
                 moveSpeed: cfg.moveSpeed,
@@ -384,18 +399,7 @@ export default class GameScene extends Scene3D {
                 xMax: enc.zoneXMax - 0.5,
                 zMin: -10.5,
                 zMax: -3.5,
-            }))
-
-            const mixer = this.third.animationMixers.create(group)
-            const staticClip = gltf.animations.find((a: any) => a.name === 'static')
-            const walkClip = gltf.animations.find((a: any) => a.name === 'walk')
-            if (staticClip && walkClip) {
-                const staticAction = mixer.clipAction(staticClip)
-                const walkAction = mixer.clipAction(walkClip)
-                staticAction.play()
-                walkAction.setEffectiveWeight(0).play()
-                this.animalMixers.set(wanderKey, { staticAction, walkAction })
-            }
+            }, animPair))
 
             // Primary (idx 0) stored in animalGroups for icons/effects/delivery position
             if (idx === 0) this.animalGroups.set(cfg.id, [group])
@@ -441,17 +445,18 @@ export default class GameScene extends Scene3D {
     // ── ITEMS ────────────────────────────────────────────────────────────
 
     private async loadItems() {
-        for (const cfg of this.ld.items) {
+        await Promise.all(this.ld.items.map(async cfg => {
             const pos = new Vector3(cfg.position.x, cfg.position.y, cfg.position.z)
             this.itemPositions.set(cfg.type, pos)
 
             let mesh: Group | Mesh
             if (cfg.model) {
-                try {
-                    const g = await this.third.load.gltf(cfg.model)
-                    g.scene.scale.setScalar(cfg.scale)
-                    mesh = g.scene
-                } catch {
+                const gltf = await this.assetLoader.loadGltf(cfg.model)
+                if (gltf) {
+                    const scene = gltf.scene.clone(true)
+                    scene.scale.setScalar(cfg.scale)
+                    mesh = scene
+                } else {
                     mesh = this._fallbackMesh(cfg.type)
                 }
             } else {
@@ -463,7 +468,7 @@ export default class GameScene extends Scene3D {
             if (cfg.startVisible === false) mesh.visible = false
             this.third.scene.add(mesh)
             this.itemMeshes.set(cfg.type, mesh)
-        }
+        }))
     }
 
     private _fallbackMesh(type: string): Mesh {
@@ -479,26 +484,15 @@ export default class GameScene extends Scene3D {
     // ── PROPS ────────────────────────────────────────────────────────────
 
     private async loadProps() {
-        const cache = new Map<string, Group | null>()
-        for (const prop of this.ld.props) {
-            if (!cache.has(prop.model)) {
-                try {
-                    const gltf = await this.third.load.gltf(prop.model)
-                    cache.set(prop.model, gltf.scene)
-                } catch {
-                    console.warn('prop model not found:', prop.model)
-                    cache.set(prop.model, null)
-                }
-            }
-            const template = cache.get(prop.model)
-            if (!template) continue
-
-            const clone = template.clone(true)
+        await Promise.all(this.ld.props.map(async prop => {
+            const gltf = await this.assetLoader.loadGltf(prop.model)
+            if (!gltf) return
+            const clone = gltf.scene.clone(true)
             clone.position.set(prop.x, prop.y, prop.z)
-            if (prop.rotY !== undefined) clone.rotation.y = prop.rotY
+            if (prop.rotY  !== undefined) clone.rotation.y = prop.rotY
             if (prop.scale !== undefined) clone.scale.setScalar(prop.scale)
             this.third.scene.add(clone)
-        }
+        }))
     }
 
     // ── INTERACTION ──────────────────────────────────────────────────────
@@ -541,9 +535,9 @@ export default class GameScene extends Scene3D {
             let c: Phaser.GameObjects.Container
             if (item.id.endsWith('_purchase')) {
                 const cost = parseInt(item.bubbleLabel.replace('⭐', ''), 10)
-                c = this._createPurchaseBubble(cost)
+                c = createPurchaseBubble(this, cost)
             } else {
-                c = this._createActionBubble(item.bubbleLabel, item.bubbleIcon)
+                c = createActionBubble(this, item.bubbleLabel, { iconKey: item.bubbleIcon })
             }
             c.on('pointerdown', () => { if (c.visible) item.action() })
             item.bubbleSprite = c
@@ -566,7 +560,7 @@ export default class GameScene extends Scene3D {
             carryObj = this._fallbackMesh(type)
         }
         this.third.scene.add(carryObj)
-        this.normalizeAnimalHeight(carryObj, 0.35)
+        this.normalizeAnimalHeight(carryObj, CARRY_ITEM_HEIGHT)
         carryObj.position.y = 0
         this.carriedItems.push({type, mesh: carryObj})
         if (original) original.visible = false
@@ -679,61 +673,6 @@ export default class GameScene extends Scene3D {
                 })
             }, [], this)
         }
-    }
-
-    // ── BUBBLE CREATION ──────────────────────────────────────────────────
-
-    private _createActionBubble(label: string, iconKey?: string): Phaser.GameObjects.Container {
-        const W = 74, H = 74, R = 16
-        const shadow = this.add.graphics()
-        shadow.fillStyle(0x000000, 0.28)
-        shadow.fillRoundedRect(-W / 2 + 3, -H / 2 + 5, W, H, R)
-        const bg = this.add.graphics()
-        bg.fillStyle(0xffffff, 1)
-        bg.fillRoundedRect(-W / 2, -H / 2, W, H, R)
-        const icon: any = iconKey && this.textures.exists(iconKey)
-            ? this.add.image(0, 0, iconKey).setDisplaySize(46, 46)
-            : this.add.text(0, 2, label, {fontSize: '32px'}).setOrigin(0.5)
-        // Pointer indicator above bubble — larger for legibility
-        const tapPointer = this.add.image(0, -H / 2, 'ui-pointer')
-            .setDisplaySize(48, 48).setOrigin(0.5).setAngle(180)
-        this.tweens.add({
-            targets: tapPointer, scaleX: 1.18, scaleY: 1.18,
-            duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-        })
-        const tapLabel = this.add.text(0, -H / 2 - 54, 'GIVE', {
-            fontSize: '24px', color: '#ffffff', fontStyle: 'bold', fontFamily: FONT,
-            stroke: '#000000', strokeThickness: 4,
-        }).setOrigin(0.5)
-        return this.add.container(0, 0, [shadow, bg, icon, tapPointer, tapLabel])
-            .setVisible(false).setDepth(17).setScale(0).setSize(W, H).setInteractive()
-    }
-
-    private _createPurchaseBubble(cost: number): Phaser.GameObjects.Container {
-        const W = 74, H = 88, R = 16
-        const shadow = this.add.graphics()
-        shadow.fillStyle(0x000000, 0.28)
-        shadow.fillRoundedRect(-W / 2 + 3, -H / 2 + 5, W, H, R)
-        const bg = this.add.graphics()
-        bg.fillStyle(0xffe57a, 1)
-        bg.fillRoundedRect(-W / 2, -H / 2, W, H, R)
-        const starIcon = this.add.image(0, -14, 'ui-star').setDisplaySize(36, 36).setOrigin(0.5)
-        const numText = this.add.text(0, 20, String(cost), {
-            fontSize: '22px', color: '#7a4500', fontFamily: FONT, fontStyle: 'bold',
-        }).setOrigin(0.5)
-        // Pointer indicator above bubble
-        const tapPointer = this.add.image(0, -H / 2 - 20, 'ui-pointer')
-            .setDisplaySize(42, 42).setOrigin(0.5).setAngle(180)
-        this.tweens.add({
-            targets: tapPointer, scaleX: 1.18, scaleY: 1.18,
-            duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-        })
-        const tapLabel = this.add.text(0, -H / 2 - 40, 'UNLOCK', {
-            fontSize: '13px', color: '#ffffff', fontStyle: 'bold', fontFamily: FONT,
-            stroke: '#000000', strokeThickness: 3,
-        }).setOrigin(0.5)
-        return this.add.container(0, 0, [shadow, bg, starIcon, numText, tapPointer, tapLabel])
-            .setVisible(false).setDepth(17).setScale(0).setSize(W, H).setInteractive()
     }
 
     // ── STAR CURRENCY ─────────────────────────────────────────────────────
@@ -972,21 +911,12 @@ export default class GameScene extends Scene3D {
     }
 
     private _screenEdgeClamp(tx: number, ty: number, margin: number): {x: number; y: number; angle: number} {
-        const cx = GAME_W / 2, cy = GAME_H / 2
-        const dx = tx - cx, dy = ty - cy
-        const angle = Math.atan2(dy, dx)
-        const topMargin = 70  // below prestige bar
-        const scaleX = Math.abs(dx) > 0.01 ? (GAME_W / 2 - margin) / Math.abs(dx) : Infinity
-        const scaleY = Math.abs(dy) > 0.01 ? (GAME_H / 2 - margin) / Math.abs(dy) : Infinity
-        const scale = Math.min(scaleX, scaleY, 1)
-        const ex = Math.max(margin, Math.min(GAME_W - margin, cx + dx * scale))
-        const ey = Math.max(topMargin, Math.min(GAME_H - margin, cy + dy * scale))
-        return {x: ex, y: ey, angle}
+        return clampToScreenEdge(tx, ty, margin, GAME_W, GAME_H, HUD_TOP_MARGIN)
     }
 
     private updateAnimalHud() {
-        const RING_R = 32
-        const MARGIN = 58
+        const RING_R = HUD_RING_RADIUS
+        const MARGIN = HUD_EDGE_MARGIN
         const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
 
         for (const [animalId, hud] of this.animalHudItems) {
@@ -1226,8 +1156,8 @@ export default class GameScene extends Scene3D {
         if (!mesh?.visible) return
         const pos = this.itemPositions.get(phaseCfg.requiredItem)
         if (!pos) return
-        const px = this.player.position.x, pz = this.player.position.z
-        if (Math.hypot(px - pos.x, pz - pos.z) < 1.8) {
+        const px = this.player!.position.x, pz = this.player!.position.z
+        if (Math.hypot(px - pos.x, pz - pos.z) < AUTO_PICKUP_RADIUS) {
             this.pickup(phaseCfg.requiredItem)
         }
     }
@@ -1264,6 +1194,7 @@ export default class GameScene extends Scene3D {
     }
 
     private handleMovement(dt: number) {
+        if (!this.player) return
         const {top, right} = this.moveData
         const {speed, bounds} = this.ld.world
         const moving = Math.abs(top) > 0.05 || Math.abs(right) > 0.05
@@ -1287,27 +1218,29 @@ export default class GameScene extends Scene3D {
     }
 
     private updateCarryStack() {
+        if (!this.player) return
+        const playerPos = this.player.position
         const bob = (i: number) => Math.sin(this.elapsedTime * 3 + i) * 0.08
         this.carriedItems.forEach((item, i) => {
             item.mesh.position.set(
-                this.player.position.x,
-                this.player.position.y + 2 + i * 0.6 + bob(i),
-                this.player.position.z,
+                playerPos.x,
+                playerPos.y + 2 + i * 0.6 + bob(i),
+                playerPos.z,
             )
         })
     }
 
     private updateCamera() {
+        if (!this.player) return
         const {x, y, z} = this.player.position
-        this.third.camera.position.x = MathUtils.lerp(this.third.camera.position.x, x + 2, 0.1)
+        this.third.camera.position.x = MathUtils.lerp(this.third.camera.position.x, x + CAMERA_OFFSET_X, CAMERA_LERP)
         this.third.camera.position.y = 5
-        this.third.camera.position.z = MathUtils.lerp(this.third.camera.position.z, z + 10, 0.1)
-        this.third.camera.lookAt(x + 2, y + 0.5, z)
+        this.third.camera.position.z = MathUtils.lerp(this.third.camera.position.z, z + CAMERA_OFFSET_Z, CAMERA_LERP)
+        this.third.camera.lookAt(x + CAMERA_OFFSET_X, y + 0.5, z)
     }
 
     private project(worldPos: Vector3): { x: number; y: number } {
-        const v = worldPos.clone().project(this.third.camera)
-        return {x: (v.x + 1) / 2 * GAME_W, y: (1 - v.y) / 2 * GAME_H}
+        return projectToScreen(worldPos, this.third.camera)
     }
 
     private _showBubble(item: Interactable) {
@@ -1343,6 +1276,7 @@ export default class GameScene extends Scene3D {
     }
 
     private updateBubbles() {
+        if (!this.player) return
         const px = this.player.position.x, pz = this.player.position.z
         const range = this.ld.world.interactRange
         for (const item of this.interactables) {
@@ -1384,13 +1318,14 @@ export default class GameScene extends Scene3D {
     // ── PER-ANIMAL PROXIMITY-BASED NEEDS ────────────────────────────────
 
     private updateNeeds(dt: number) {
+        if (!this.player) return
         if (!this.needsDrainActive || this.phase === 'done') return
 
         const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
         const px = this.player.position.x
         const pz = this.player.position.z
         const activeDrainRate = 1 / this.ld.world.timerDuration
-        const idleRate = 0.025
+        const idleRate = NEEDS_IDLE_RATE
         for (const animal of this.ld.animals) {
             const enc = this.ld.enclosures.find(e => e.id === animal.enclosureId)!
             const isLocked = animal.startLocked && !this.purchasedEnclosures.has(animal.enclosureId)
@@ -1559,7 +1494,13 @@ export default class GameScene extends Scene3D {
         }).setOrigin(0.5)
         const btnCtr = this.add.container(cx, PANEL_CY + 245, [btnImg, btnText])
             .setDepth(103).setSize(330, 74).setInteractive()
-            .on('pointerdown', () => console.log('CTA → store redirect'))
+            .on('pointerdown', () => {
+                if (typeof (window as any).onCTATapped === 'function') {
+                    (window as any).onCTATapped()
+                } else {
+                    window.open('https://play.google.com/store/apps/details?id=com.zookeeper.game', '_blank')
+                }
+            })
 
         // ── Animations ───────────────────────────────────────────────────
 
@@ -1599,5 +1540,46 @@ export default class GameScene extends Scene3D {
                 })
             },
         })
+    }
+
+    // ── TEARDOWN ─────────────────────────────────────────────────────────
+
+    shutdown() {
+        // Remove joystick DOM element
+        if (this.joystickEl) {
+            this.joystickEl.remove()
+            this.joystickEl = null
+        }
+
+        // Stop all tweens
+        this.tweens.killAll()
+
+        // Clear AI instances
+        this.animalWanders.clear()
+
+        // Dispose Three.js geometry and materials
+        this.third.scene.traverse((obj: any) => {
+            if (obj.geometry) obj.geometry.dispose()
+            if (Array.isArray(obj.material)) {
+                obj.material.forEach((m: any) => m.dispose())
+            } else if (obj.material) {
+                obj.material.dispose()
+            }
+        })
+
+        // Clear scene object references
+        this.animalGroups.clear()
+        this.animalOriginalMats.clear()
+        this.itemMeshes.clear()
+        this.itemPositions.clear()
+        this.itemBaseY.clear()
+        this.animalHudItems.clear()
+        this.pickupArrows.clear()
+        this.bubbleWiggles.clear()
+        this.prevBubbleVisible.clear()
+        this.animalNeeds.clear()
+        this.animalWasOffscreen.clear()
+        this.interactables = []
+        this.carriedItems = []
     }
 }
