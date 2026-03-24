@@ -1,318 +1,185 @@
-# 🦁 GDD — Zoo Keeper Playable Ad
-
----
+# 🦁 GDD — ZooKeeper Playable Ad
 
 ## Synopsis
 
-You are the manager of a small zoo — and your animals are not happy. Move through the zoo path, discover what each animal needs, and deliver the right item before time runs out.
+You will be the manager of a small zoo, and your animals will need you to take care of them. Move through the zoo, discover what each animal needs, and deliver the right item before time runs out, otherwise they can be angry!
 
-The player controls a character from a third-person follow camera, moving primarily left-to-right (with depth movement available) via a virtual joystick. Walking near a pickup item automatically grabs it; walking into an enclosure zone shows a delivery bubble to tap and complete the drop-off. Carried items stack visibly on the player's head (up to 2 at once).
+The player will move through the zoo, pick up helpful items along the way, and deliver them to each animal when prompted. Three animals will appear along the path: a monkey, an elephant, and a lion. Taking care of each one will reward the player with stars, which will unlock the next enclosure. Each new animal will initially be shown as a silhouette until it is unlocked.
 
-Three animals wait along the path: a **Monkey** who is hungry, an **Elephant** who is thirsty, and a **Lion** who is both hungry and dangerous. Caring for each animal earns stars, which are spent to unlock the next enclosure — whose species is hidden as a dark silhouette until purchased. The Lion requires a two-step sequence: throw in a coconut toy to distract it first, then deliver the turkey while it's occupied.
-
-If the per-animal countdown timer expires, a "YOU'RE FIRED!" screen appears — but a friendly retry button puts the manager back on the job without restarting from scratch. Succeed with all three animals and the zoo erupts in celebration, followed by a "NEW ANIMAL UNLOCKED" teaser and a download CTA.
+If an animal's needs are not fulfilled in time, a lighthearted fail screen will appear with a quick retry option. Successfully helping all three animals will trigger a celebration, followed by a giraffe teaser and a download call to action.
 
 ---
 
-## 1. Clarifying Questions & Assumed Answers
+## 📚 1. References
+
+The references vary from cozy games to real zoo management games. Other playable ads are valid references for camera, movement, mechanics, CTAs, tutorials, and mostly how to make the player quickly engage with the game.
+
+---
+
+## ❓ 2. Questions to the Briefing Writer
 
 **Q1. How does the player discover what an animal needs?**
 
-The briefing says the player "checks for each animal's need" and doesn't specify how that need is communicated. Is it shown through a floating icon, an animation, a sound cue, or does the player have to tap the animal first to reveal it?
+The briefing describes "checking each animal's need" without specifying how that need is communicated. A playable ad must deliver its goal within the first few seconds, so the discovery method directly impacts initial comprehension.
 
-> **Answer:** A floating need icon appears above each animal from the start of that enclosure's phase (banana above Monkey, water droplet above Elephant, meat above Lion). Additionally, a bouncing arrow floats above the exact item the player currently needs to pick up, removing any ambiguity. Both cues are immediately readable without an extra tap.
-
----
-
-**Q2. What is the exact interaction mechanic to fulfill a need?**
-
-"Taking care" of an animal is described but not mechanically defined. Should the player tap a button, drag an item to the animal, perform a gesture, or complete a mini-game?
-
-> **Answer:** The player moves with a virtual joystick. Walking within 1.8 world units of the phase-required item **automatically picks it up** — no tap needed. Once inside the correct delivery zone, a bubble appears above the delivery point; tapping it completes the delivery. The core mechanic is **walk near item → auto-grab → walk into zone → tap bubble**:
-> - **Monkey** → walk near banana → auto-grab → enter monkey enclosure → tap delivery bubble
-> - **Elephant** → walk near water barrel → auto-grab → enter elephant enclosure → tap delivery bubble
-> - **Lion** → two-step: walk near coconut toy → auto-grab → enter lion enclosure → tap to throw in → turkey is revealed → walk near turkey → auto-grab → re-enter enclosure → tap delivery bubble
+> **Answer:** A floating need icon will appear above each animal at the start of its enclosure phase, such as a banana above the monkey, a water droplet above the elephant, and meat above the lion. A bouncing arrow will also highlight the required item in the world. Both cues will be readable at a glance without requiring additional interaction.
 
 ---
 
-**Q3. Are locked animals visible before being unlocked, or hidden entirely?**
+**Q2. What is the core interaction mechanic?**
 
-The briefing says each care action "unlocks a new one," but it's unclear whether upcoming animals are visible (but inactive) or completely hidden.
+The briefing mentions "taking care of animals" but leaves the actual mechanic open. Tap, drag, gesture, or mini-games? The chosen solution must support one-handed mobile play and be understandable in under five seconds.
 
-> **Answer:** All three enclosures are visible from the start, but the second and third animals are shown only as dark silhouettes with a padlock icon in the HUD portrait — the exact species is never revealed until the enclosure is purchased with stars. The enclosure structure (fence, ground, props) is fully visible, giving a clear sense of progression and spatial layout without spoiling the animal.
-
----
-
-**Q4. In a 3D environment, what does "moving the screen horizontally" mean exactly?**
-
-In 2D this is a simple pan. In 3D it could mean a camera dolly, a character walking a path, or swipe-to-rotate. The perspective is unspecified.
-
-> **Answer:** The camera follows the player via a smoothed lerp in both X and Z, always positioned above and behind. The player runs left-to-right along the zoo path to progress between animals, but can also step into enclosure depth (Z axis) to reach items placed inside. The dominant direction of travel is horizontal, preserving the "scroll" feel while allowing natural exploration within each enclosure.
+> **Answer:** The interaction will be based on movement and contextual actions. The player will walk near an item to pick it up automatically, then enter a delivery zone where a tap prompt will appear to complete the action.
+>
+> The core loop will be simple and repeatable: **move → collect → deliver → tap.**
+>
+> This structure will keep the experience intuitive, reduce friction, and allow different animal needs to be introduced without adding new control complexity.
 
 ---
 
-**Q5. Is there a fail state or time pressure?**
+**Q3. Are locked animals visible before unlocking?**
 
-The briefing doesn't mention consequences for inaction. Should animals become sadder over time? Can the player fail?
+We know that each care action unlocks a new animal, but it's unclear how upcoming content is revealed to the player. For a playable ad, this point can be crucial for retention. We should explore the player's curiosity.
 
-> **Answer:** Yes. Each animal has a needs meter that drains continuously once active. The first animal's drain starts immediately at game boot; each subsequent animal's drain starts as soon as the previous delivery is completed. If the active animal's needs reach zero, a screen shake fires followed by a "YOU'RE FIRED!" overlay — panel card, broken star icon, subtitle "YOUR ANIMALS NEED YOU.", and a "TRY AGAIN" button. Retry resets only the current animal — no full restart. All unlocked-but-unfinished animals also have a slow passive drain (visible as HUD ring) to reward efficient play, but only the active animal triggers the fired screen.
-
----
-
-**Q6. What should the endcard contain beyond a download button?**
-
-The briefing specifies "a download button instigating the player to play more" but defines nothing else.
-
-> **Answer:** Staggered animated sequence: background illustration → panel card slides up → game logo drops in → giraffe teaser punches in with "NEW ANIMAL UNLOCKED" copy → pulsing "PLAY NOW!" CTA button. Win SFX plays; BGM fades out. The giraffe teaser exploits FOMO — the player sees what they could unlock in the full game.
+> **Answer:** All three enclosures will be visible from the start, while locked animals will be represented as dark silhouettes with a padlock indicator, keeping their identity hidden until unlocked with stars.
+>
+> This approach will provide a clear sense of progression across the zoo while maintaining curiosity about future unlocks, balancing visibility with discovery.
 
 ---
 
-**Q7. Should there be audio?**
+**Q4. Is there a fail state or time pressure?**
 
-The briefing makes no mention of sound effects or music.
+The briefing does not specify how failure or time pressure should be handled, leaving room to define the level of challenge and pacing.
 
-> **Answer:** Yes. A cheerful background music loop plus interaction SFX: footstep variants (3 clips, randomly chosen), bubble whoosh on pop-in, per-animal delivery cheers, an ascending coin jingle as each star flies to the HUD, and a win fanfare on endcard. Audio is toggleable. All audio events are managed by a centralised `SoundManager` with independent music/SFX volume controls.
-
----
-
-**Q8. What is the visual/art direction?**
-
-The briefing says nothing about style, color palette, or tone.
-
-> **Answer:** Low-poly 3D, bright saturated colors, cute cartoon sensibility. Lightweight GLB models with baked idle and walk animations, flat-colored ground planes, and a Phaser 2D overlay for all HUD and UI. Font: Baloo 2 (friendly, rounded, mobile-legible).
+> **Answer:** Each animal will have its own time limit, represented by a continuously draining need. The timer will start when the animal becomes active and will reset after each successful delivery. If the player does not meet the requirement before time runs out, a fail state will be triggered.
+>
+> The fail moment will be communicated through light feedback such as a brief camera shake, followed by a playful, character-driven message aligned with the theme of caring for animals. A "Try Again" option will allow the player to retry from the current animal without restarting the full experience.
 
 ---
 
-**Q9. Should the game be 2D or 3D?**
+**Q5. What is the visual and technical direction?**
 
-The briefing does not specify the dimensionality of the game world.
+The briefing does not define a specific art style or technical approach.
 
-> **Answer:** 3D world with a 2D UI overlay. The game uses Phaser 3 as the app shell (input, tweens, audio, HUD) with enable3d providing a Three.js 3D rendering layer. Low-poly GLB models populate the world; all HUD elements, bubbles, and overlays are Phaser 2D objects rendered on top. This hybrid approach delivers a polished 3D feel while keeping the codebase maintainable and the build within budget.
-
----
-
-**Q10. Should the player be able to fail / lose?**
-
-Related to Q5, but specifically: should there be a lose state, and if so, how punishing should it be?
-
-> **Answer:** Yes — soft fail per animal. When the active animal's timer hits zero, a comedic "YOU'RE FIRED!" screen appears. The player retries that single animal (timer resets, carried items dropped, two-step phases revert to their first step). The full game never restarts from the beginning. Wrong-item delivery is not a fail condition — auto-pickup only grabs the phase-required item, making wrong delivery structurally impossible.
+> **Answer:** For playable ads, the most important goal is to convert the playable session into installs or clicks. To achieve this, we need to keep players engaged and amazed by the short game experience.
+>
+> The game will use a cute, stylized, low-poly 3D environment with a bright, saturated color palette and a light cartoon tone, aligned with the casual and accessible nature of playable ads. This approach will deliver a visually engaging 3D experience.
 
 ---
 
-**Q11. Should the player move horizontally only, or primarily horizontally?**
-
-The briefing describes "moving the screen horizontally" but the game is 3D — the player could be constrained to a rail or free to move in all directions.
-
-> **Answer:** Primarily horizontally. The joystick is 8-directional, so the player can move into enclosure depth (Z axis) to reach items placed inside. However, the entire level runs left-to-right — three enclosures spaced along the X axis, with the main path at Z ≈ 0. The dominant direction of travel and narrative progression is horizontal. World bounds clamp the player to X ∈ [−15, 20] and Z ∈ [−12.5, 4].
-
----
-
-## 2. Game Overview
+## 🎮 3. Game Overview
 
 | Field | Value |
 |---|---|
-| **Format** | Playable Ad (Web, HTML5) |
-| **Engine** | Phaser 3 + enable3d (Three.js 3D layer) |
-| **Language** | TypeScript |
-| **Bundler** | Webpack 5 |
-| **Target Duration** | ~45–60 seconds |
-| **Build Size Limit** | 5 MB |
-| **Delivery** | Single self-contained `index.html` (assets base64-inlined) |
-| **Resolution** | Portrait 540 × 960 |
-| **Art Style** | Low-poly 3D, cute/colorful |
-| **Core Fantasy** | You are a zoo manager. Your animals need you |
+| **Platform** | Playable Ad (Web, HTML5) |
+| **Target Duration** | 45–60 seconds |
+| **Narrative Background** | You are a zoo manager. Take care of the animals to unlock new species. |
+| **Art Style** | Stylized low-poly 3D with a bright and colorful tone |
+| **Player Experience** | Engaging and satisfying from the first few seconds, with clear one-handed controls and a sense of discovery |
 
 ---
 
-## 3. Animals & Interactions
+## 🕹️ 4. Gameplay
 
-| Order | Animal | Need | Item | Mechanic | Notes |
-|---|---|---|---|---|---|
-| 1st | 🐒 Monkey | Hungry | 🍌 Banana | Auto-grab banana → enter enclosure → tap delivery bubble | First phase, always unlocked |
-| 2nd | 🐘 Elephant | Thirsty | 🛢 Water Barrel | Auto-grab barrel → enter enclosure → tap delivery bubble | Costs 25 ⭐ to unlock |
-| 3rd | 🦁 Lion | Hungry + Dangerous | 🥥 Coconut Toy → 🍗 Turkey | Step 1: auto-grab toy → enter enclosure → tap to throw. Step 2: turkey is revealed → auto-grab → re-enter → tap delivery bubble | Costs 75 ⭐ to unlock; two-phase sequence |
+The gameplay is built around a simple loop of navigating the environment, collecting items, and delivering them to fulfill the animal's needs. The player interacts with the world through proximity-based actions, progressing by completing each objective in sequence.
 
-All three animals share the same core verb. Variety comes from level layout, the lion's two-step sequence, and the star-gate progression. Items bob and spin in the world to aid discoverability; a bouncing arrow above the current required item removes ambiguity for first-time players. The player can carry up to 2 items at once (visible stack on head).
+- Items are collected automatically when the player approaches them
+- Each animal requires specific items to be delivered in order to progress
+- Progression unfolds across a series of targets with increasing complexity
+- A time-based system applies pressure through draining needs tied to current animals
+- The player fails if the current animal need is not fulfilled before its timer runs out
 
----
+### Animals & Interactions
 
-## 4. Core Loop
-
-```
-Spawn (timer already draining for first animal)
-       ↓
-Walk near item → Auto-grab
-       ↓
-Walk into delivery zone → Tap bubble → Deliver
-       ↓
-Earn ⭐ Stars → Fly to HUD counter
-(timer resets and restarts for next animal)
-       ↓
-[next enclosure locked?]
-Yes → Tap purchase bubble → Spend ⭐ → Unlock → Repeat
-No  → Move to next animal → Repeat
-       ↓
-  [all 3 done]
-       ↓
-    Endcard
-```
-
-**Fail path:**
-
-```
-Needs reach 0 → Camera shake → "YOU'RE FIRED!" overlay → TRY AGAIN → Retry current animal only
-```
-
----
-
-## 5. User Flow
-
-### 5.1 Loading State
-
-- Minimal loading screen with game logo and progress bar
-- Target: under 2 seconds on average mobile connection
-- All GLTF models load in parallel at startup
-
-### 5.2 Gameplay
-
-- Player character moves via on-screen virtual joystick (bottom-right, dynamic — anchors to first touch point)
-- Tutorial hand icon + "SWIPE" label appears at game start; auto-dismisses after 9 seconds or on first joystick input
-- A bouncing arrow floats above the current phase's required item, pointing directly at it
-- Walking within 1.8 world units of the required item auto-grabs it — no tap needed
-- Grabbed items appear as a visual stack above the player's head (max 2 items, with bob animation)
-- Walking into a delivery zone shows a tap bubble above the delivery point
-- Tapping the bubble delivers the item: per-animal cheer SFX + animal bounce tween + hearts VFX
-- Stars are awarded and fly individually from the delivery point to the star HUD counter (ascending coin pitch per star)
-- If the next enclosure is locked, a gold purchase bubble appears at its entrance; tapping spends stars and unlocks the animal with a reveal animation
-- The active animal's needs drain continuously from game start; the drain resets and resumes for the next animal immediately after each delivery
-- Needs reach zero → camera shake → "YOU'RE FIRED!" overlay (broken star icon, subtitle *"YOUR ANIMALS NEED YOU."*, red "TRY AGAIN" button) → retry current animal only
-- Animal HUD portraits float above each enclosure in world space, each showing a radial needs ring (green → yellow → red as needs drain)
-- Off-screen HUD portraits clamp to screen edges with a directional arrow pointing toward the enclosure
-
-### 5.3 Endcard
-
-- BGM fades out; win SFX plays
-- Staggered animation sequence:
-  1. Background illustration fades in
-  2. Panel card + "YOUR ZOO IS BOOMING!" headline + "PLAY NOW!" button slide up from bottom as a group
-  3. Game logo drops in from top
-  4. Giraffe teaser punches in with "NEW ANIMAL UNLOCKED" copy
-  5. "PLAY NOW!" CTA button pulses continuously (scale-bounce loop)
-- Button triggers standard ad-network store redirect (`window.onCTATapped` hook with `window.open` fallback)
-
----
-
-## 6. VFX Budget
-
-All currently implemented effects are **tween-based** — no real particle systems yet. The budget allows up to 3 if needed for heavier effects.
-
-| # | Effect | Implementation | Trigger | Status |
+| Order | Animal | Need | Item | Unlock Cost |
 |---|---|---|---|---|
-| — | Happy burst | 5 heart images tweened (scale-in + float-up-fade) | Animal successfully cared for | ✅ Implemented |
-| — | Unlock reveal | 3D group scale bounce ×3 (yoyo tween) | Enclosure purchased | ✅ Implemented |
-| 1 | Endcard confetti | Particle — colored paper pieces | Endcard appears | 🔲 Planned |
+| 1st | 🐒 Monkey | Hungry | 🍌 Banana | Free |
+| 2nd | 🐘 Elephant | Thirsty | 🛢 Water Barrel | 25 ⭐ |
+| 3rd | 🦁 Lion | Hungry + Dangerous | 🥎 Toy → 🍗 Food | 75 ⭐ |
 
-**Tween-only effects:**
-
-- Animal bounce on success (Y-axis scale)
-- Need icon bob (Y-axis sine wave)
-- Item world bob + spin (passive, always on)
-- CTA button pulse (uniform scale loop)
-- Fail screen camera shake (before overlay appears)
-- Padlock icon scale-out on unlock
-- Star fly-to-HUD (5 sprites fly from delivery point to counter; counter ticks up as each arrives)
-- "+N stars" popup spring from delivery point (scale bounce)
-- Prestige bar fill advance (width tween + animal portrait tint: dark → full color)
-- Giraffe teaser punch-in on endcard (Back.easeOut scale from zero)
-- UI overlay slide-in (Y-axis ease-out)
+The lion introduces a two-step interaction: after the toy is delivered, the food becomes available for a second delivery. This adds variety to the gameplay and prevents repetitive interactions, giving the player hints that the real game can scale the difficulty.
 
 ---
 
-## 7. Asset Budget
-
-Total hard limit: **5 MB**
-
-| Category | Budget | Notes |
-|---|---|---|
-| Phaser + enable3d bundle | ~350 KB | Gzipped (Phaser ~200KB, enable3d + Three.js ~150KB) |
-| 3D models (GLB) | ~900 KB | Player + 3 animals + fence segment + ~7 env props |
-| Animations | ~300 KB | Idle + walk per character/animal, baked into GLBs |
-| Textures | ~600 KB | 1 atlas per animal, 512×512px |
-| Environment | ~300 KB | Ground planes, path, enclosure floors (procedural colored meshes) |
-| UI sprites | ~150 KB | Need icons, padlock, star, pointer, portraits, buttons, logo — PNG |
-| Audio — Music | ~300 KB | 1 loop, MP3, mono, 96kbps |
-| Audio — SFX | ~300 KB | ~10 effects (footstep ×3, whoosh, animal cheers ×3, coin, win) |
-| Code + HTML | ~200 KB | TypeScript compiled + Webpack bundle |
-| Buffer | ~800 KB | Covers base64 inflation (~33%) for single-HTML delivery |
-| **Total** | **~4.0 MB** | ~1 MB under the 5 MB hard limit |
-
-> ⚠️ If the build approaches 4.5 MB, cut the music loop first — keep SFX only.
-
----
-
-## 8. Technical Notes
-
-### Engine: Phaser 3 + enable3d
-
-- **Phaser 3** handles: 2D canvas, virtual joystick input, tweens, audio, all HUD and UI elements
-- **enable3d** bridges Phaser to a **Three.js** 3D renderer sharing the same WebGL context
-- **TypeScript** for full type safety across all game code
-- **Webpack 5** bundles everything; base64 asset inlining produces the single-HTML ad deliverable
-- Version-controlled on Git normally — no proprietary project format or browser-locked editor
-
-### No Physics
-
-Ammo.js is **explicitly disabled** (`usePhysics: false`). This saves ~2 MB of wasm and removes async init complexity.
-
-| What physics would normally handle | How it's done instead |
-|---|---|
-| Character movement | `position.x += direction * speed * dt` |
-| World bounds | `Math.max(MIN, Math.min(MAX, pos))` |
-| Proximity detection | `Math.hypot(a.x - b.x, a.z - b.z) < radius` |
-| Fence collision | Visual-only fences; `AnimalWander` uses rectangular clamp bounds |
-
-### Input
-
-- **Movement:** 8-directional virtual joystick (dynamic — anchors to first touch point)
-- **Interaction:** single tap on delivery or purchase bubble
-- **Item pickup:** automatic on proximity — no tap required
-
-### Data-Driven Level
-
-All positions, speeds, item definitions, phase rules, enclosure unlock costs, and colors live in `level.json`. Adding a new animal or adjusting timer duration requires no TypeScript code changes.
-
-### Build & Delivery
-
+## 🔄 5. Core Loop
 ```
-npm run start   → dev server at http://localhost:8080
-npm run build   → production build in dist/
+Spawn (needs draining)
+    ↓
+Walk near item → Auto-grab
+    ↓
+Walk into zone → Tap bubble → Deliver → Earn stars ⭐
+(needs reset for next animal)
+    ↓
+[enclosure locked?] → Spend stars ⭐ → Unlock → Repeat
+    ↓
+Endcard with CTA
 ```
 
-For single-HTML ad delivery, all assets are base64-inlined via Webpack loaders. The final `index.html` is self-contained with zero external dependencies.
+**Fail path:** needs reach 0 → camera shake → playful, character-driven fail message → TRY AGAIN → retry current animal
 
 ---
 
-## 9. Out of Scope
+## 🎯 6. CTA Screen
 
-Deliberately excluded to respect the 1-minute duration and 5 MB limit:
+The CTA screen should highlight the player's sense of progress and achievement, transitioning into a clear and compelling call to action.
 
-- Character customization or skins
-- Persistent save state
-- Multiplayer or social features
-- Narrative dialogue or cutscenes
-- Dynamic physics simulation
+A celebratory version of the zoo will reinforce growth and success, supporting the feeling that the player has built something meaningful. The main message will focus on expansion and reward, paired with a prominent "Play Now" button designed to drive immediate interaction.
+
+A teaser of a new animal will suggest continued progression beyond the playable experience, encouraging curiosity and motivating the player to keep playing.
+
+The CTA will remain visually prominent and active, guiding the player toward the next step.
 
 ---
 
-## 10. Planned but Removed
+## ⚙️ 7. Technical Notes
 
-Features originally designed or considered that were cut or superseded during development:
+### Platform & Constraints
 
-| Feature | Original Plan | Why Removed / Changed |
+- **Build Size:** Max 5 MB
+- **Platform:** Mobile browsers (primary)
+- **Input:** Tap / drag only
+- **Delivery:** Single self-contained HTML file
+
+**Out of scope:** Persistent progression, multiplayer, narrative systems, account or external integrations.
+
+### Stack
+
+- **Engine:** Phaser 3 + enable3d (Three.js)
+- **Language:** TypeScript
+- **Resolution:** Portrait (540 × 960)
+
+Phaser handles input, UI, audio, and timing. enable3d renders the 3D scene in the same WebGL context. This setup avoids editor dependency, keeps version control straightforward, and gives direct control over performance.
+
+Physics is not used — the interaction model doesn't require it, and excluding it reduces build size.
+
+TypeScript is used throughout for type safety, better refactoring confidence, and IDE tooling support.
+
+### Data-Driven Configuration
+
+Gameplay parameters are defined in JSON:
+
+- Animal positions
+- Phase rules
+- Unlock costs
+- Visual parameters
+
+This allows content adjustments without touching code, and supports A/B testing different values or creating multiple variants from the same codebase.
+
+### Asset Budget
+
+The project has a hard limit of **5 MB**.
+
+| Category | Size | Notes |
 |---|---|---|
-| **PlayCanvas engine** | Initial engine choice for its small footprint and web-first export | Replaced by Phaser 3 + enable3d for full code control, standard Git workflow, and a better 2D/3D hybrid architecture |
-| **`playcanvas-rest-api-tools` export** | `npm run one-page` to embed all assets into a single HTML file | No longer applicable — Webpack 5 handles bundling and base64 asset inlining natively |
-| **Tap-to-pickup interaction** | Player taps a bubble above a food crate to pick it up | Replaced by auto-pickup on proximity — tap-while-using-joystick is ergonomically awkward; auto-grab on walk is the standard mobile 3D UX pattern |
-| **Wrong-item delivery fail state** | Delivering the wrong food item triggers an immediate fail screen | Structurally removed — auto-pickup only grabs the phase-required item, making wrong delivery impossible by design |
-| **"Economy / currency system" out of scope** | Original brief listed this as explicitly excluded | Re-scoped in as the star system: stars are earned on delivery and spent to unlock enclosures, creating a lightweight progression loop within the ad |
-| **Horizontal-only movement** | Original brief implied a left-to-right side scroller | Expanded to 8-directional 3D movement so the player can navigate enclosure depth to reach items |
+| Framework (Phaser + Three.js + enable3d) | ~2,218 KB | Vendors bundle. Drops to ~650 KB if gzip is supported |
+| 3D models (GLBs) | ~784 KB | Player, 3 animals, food items, env props. Animations baked in |
+| UI sprites | ~444 KB | Portraits, icons, buttons, logo |
+| Audio | ~180 KB | ~10 SFX + 1 BGM loop |
+| 3D textures | ~40 KB | Light atlas textures per model |
+| Game code + HTML | ~50 KB | TypeScript, minified |
+| Config files | ~10 KB | Level layout, game tuning, audio config |
+| Base64 overhead | ~478 KB | +33% for single-file HTML delivery |
+| **Total** | **4,200 KB (4.1 MB)** | ~800 KB under the 5 MB limit |
+
+**Budget priorities:** Critical → Gameplay, SFX, core visuals. Flexible → Music, texture resolution. If the build approaches ~4.5 MB, music is removed first.
