@@ -155,6 +155,7 @@ export default class GameScene extends Scene3D {
         // Audio
         this.load.audio('bgm',            'assets/audios/bgm.mp3')
         this.load.audio('sfx-whoosh',     'assets/audios/Whoosh.mp3')
+        this.load.audio('sfx-unlock',     'assets/audios/purchase.mp3')
         this.load.audio('sfx-coin',       'assets/audios/Coin Bag 3-1.mp3')
         this.load.audio('sfx-win',        'assets/audios/win-sound.mp3')
         this.load.audio('sfx-monkey',     'assets/audios/monkey.mp3')
@@ -1066,6 +1067,7 @@ export default class GameScene extends Scene3D {
         // Guard first — prevents double-purchase from rapid taps
         if (this.purchasedEnclosures.has(encId)) return
         this.purchasedEnclosures.add(encId)
+        this.sfx.playSfx('sfx-unlock', { volume: AudioConfig.sfx.unlock })
 
         const cost = enc.unlockCost ?? 0
         if (this.starCount < cost) {

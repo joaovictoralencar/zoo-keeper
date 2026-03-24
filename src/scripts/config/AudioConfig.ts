@@ -21,8 +21,9 @@ export const AudioConfig = {
         whoosh:   1.0,   // bubble pop-in
         animal:   0.75,  // monkey / elephant / lion delivery cheer
         coin:     1.0,   // enclosure purchase
-        coinStar: 0.7,   // per-star coin ding during delivery animation
+        coinStar: 1.0,   // per-star coin ding during delivery animation
         win:      1.0,   // end-card fanfare
+        unlock: 0.8,   // new enclosure unlocked
     },
 
     /** Timing in milliseconds */
