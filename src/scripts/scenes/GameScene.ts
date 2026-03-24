@@ -121,6 +121,16 @@ export default class GameScene extends Scene3D {
     private bubbleWiggles = new Map<string, Phaser.Tweens.Tween>()
     private prevBubbleVisible = new Map<string, boolean>()
 
+    // ── HUD layout ────────────────────────────────────────────────────────
+    // Edit these values to reposition or resize every HUD element at once.
+    // bar.x is derived automatically from logo.x + logo.w/2 + bar.gap.
+    private readonly HUD = {
+        logo:  { x: 70,  y: 44, w: 123, h: 87  },
+        btn:   { offsetY: 64, w: 135, h: 42, fontSize: '20px' },
+        bar:   { gap: 8, y: 35, w: 265, h: 24 },
+        stars: { marginRight: 70, y: 48, w: 80, h: 36 },
+    }
+
     constructor() {
         super({key: 'GameScene'})
     }
@@ -756,18 +766,20 @@ export default class GameScene extends Scene3D {
     // ── STAR CURRENCY ─────────────────────────────────────────────────────
 
     private setupStarHud() {
-        const x = GAME_W - 76, y = 28
-        const btnBg = this.add.image(0, 0, 'ui-button').setDisplaySize(138, 54).setOrigin(0.5)
-        const starLabel = this.add.image(32, 1, 'ui-star').setDisplaySize(34, 34).setOrigin(0.5)
-        this.starHudText = this.add.text(-18, 1, '0', {
-            fontSize: '28px', color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+        const { stars } = this.HUD
+        const x = GAME_W - stars.marginRight, y = stars.y
+        const btnBg = this.add.image(0, 0, 'ui-button').setDisplaySize(stars.w, stars.h).setOrigin(0.5)
+        const iconSize = stars.h * 0.65
+        const starLabel = this.add.image(stars.w * 0.22, 1, 'ui-star').setDisplaySize(iconSize, iconSize).setOrigin(0.5)
+        this.starHudText = this.add.text(-stars.w * 0.13, 1, '0', {
+            fontSize: `${Math.round(stars.h * 0.52)}px`, color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
             stroke: '#1a5c0a', strokeThickness: 4,
         }).setOrigin(0.5)
         this.starHud = this.add.container(x, y, [btnBg, starLabel, this.starHudText]).setDepth(28)
     }
 
     private flyStars(count: number, fromX: number, fromY: number) {
-        const toX = GAME_W - 68, toY = 26
+        const toX = GAME_W - this.HUD.stars.marginRight, toY = this.HUD.stars.y
 
         // "+N" popup springs up from delivery point
         const plusText = this.add.text(fromX, fromY - 20, `+${count}`, {
@@ -827,7 +839,9 @@ export default class GameScene extends Scene3D {
     // ── PRESTIGE BAR ─────────────────────────────────────────────────────
 
     private createPrestigeBar() {
-        const bX = 10, bY = 8, bW = 358, bH = 30
+        const { logo, bar } = this.HUD
+        const bX = logo.x + logo.w / 2 + bar.gap
+        const bY = bar.y, bW = bar.w, bH = bar.h
         const barCenterY = bY + bH / 2
 
         this.prestigeBarGfx = this.add.graphics().setDepth(22)
@@ -839,18 +853,19 @@ export default class GameScene extends Scene3D {
             {id: 'elephant', ratio: 2 / 3, stars: 100, icon: 'ui-elephant'},
             {id: 'gift',     ratio: 1.0,   stars: 150, icon: 'ui-gift'},
         ]
+        const iconSize  = Math.round(bH * 2)
+        const starSize  = Math.round(bH * 1.5)
+        const starOffY  = bH + Math.round(bH * 0.7)
+        const labelOffY = bH + Math.round(bH * 2)
         this.prestigeMilestones = []
         for (const m of milestoneData) {
             const mx = bX + bW * m.ratio
-            // Portrait centered on bar — sticks slightly above & below
-            const portrait = this.add.image(mx, barCenterY - 1, m.icon)
-                .setDisplaySize(40, 40).setOrigin(0.5).setDepth(24).setTint(0x111111)
-            // Gold star icon below bar
-            const starIcon = this.add.image(mx, bY + bH + 14, 'ui-star')
-                .setDisplaySize(22, 22).setOrigin(0.5).setDepth(24)
-            // Star count text below star icon
-            this.add.text(mx, bY + bH + 30, String(m.stars), {
-                fontSize: '13px', color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+            const portrait = this.add.image(mx, barCenterY - 4, m.icon)
+                .setDisplaySize(iconSize, iconSize).setOrigin(0.5).setDepth(24).setTint(0x111111)
+            const starIcon = this.add.image(mx, bY + starOffY, 'ui-star')
+                .setDisplaySize(starSize, starSize).setOrigin(0.5).setDepth(24)
+            this.add.text(mx, bY + labelOffY, String(m.stars), {
+                fontSize: `${Math.max(9, Math.round(bH))}px`, color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
                 stroke: '#000000', strokeThickness: 3,
             }).setOrigin(0.5).setDepth(24)
 
@@ -862,7 +877,9 @@ export default class GameScene extends Scene3D {
         if (!this.prestigeBarGfx) return
         const gfx = this.prestigeBarGfx
         gfx.clear()
-        const bX = 10, bY = 8, bW = 358, bH = 30
+        const { logo, bar } = this.HUD
+        const bX = logo.x + logo.w / 2 + bar.gap
+        const bY = bar.y, bW = bar.w, bH = bar.h
 
         // Light gray track
         gfx.fillStyle(0xbbbbbb, 1)
@@ -1168,7 +1185,29 @@ export default class GameScene extends Scene3D {
 
     // ── UI ───────────────────────────────────────────────────────────────
 
+    private createGameplayLogoHud() {
+        const { logo, btn } = this.HUD
+        this.add.image(logo.x, logo.y, 'ui-game-logo')
+            .setDisplaySize(logo.w, logo.h).setOrigin(0.5).setDepth(25)
+
+        const btnBg   = this.add.image(0, 0, 'ui-cta-button').setDisplaySize(btn.w, btn.h).setOrigin(0.5)
+        const btnText = this.add.text(0, 0, 'PLAY NOW', {
+            fontSize: btn.fontSize, color: '#ffffff', fontStyle: 'bold', fontFamily: FONT,
+            stroke: '#1a6600', strokeThickness: 3,
+        }).setOrigin(0.5)
+        this.add.container(logo.x, logo.y + btn.offsetY, [btnBg, btnText])
+            .setDepth(26).setSize(btn.w, btn.h).setInteractive()
+            .on('pointerdown', () => {
+                if (typeof (window as any).onCTATapped === 'function') {
+                    (window as any).onCTATapped()
+                } else {
+                    window.open('https://play.google.com/store/apps/details?id=com.zookeeper.game', '_blank')
+                }
+            })
+    }
+
     private setupUI() {
+        this.createGameplayLogoHud()
         this.createPrestigeBar()
         this.createAnimalHudItems()
         this.setupStarHud()
@@ -1455,6 +1494,9 @@ export default class GameScene extends Scene3D {
         const panelY  = GAME_H / 2 - 20   // slightly above center
         const D = 200
 
+        // Hide joystick while lose screen is shown
+        if (this.joystickEl) this.joystickEl.style.display = 'none'
+
         // Dark overlay
         const overlay = this.add.rectangle(cx, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.65)
             .setDepth(D).setAlpha(0)
@@ -1506,6 +1548,7 @@ export default class GameScene extends Scene3D {
         // ── Retry tap ────────────────────────────────────────────────────
         const destroyAll = () => {
             [overlay, panel, brokenStar, title, subtitle, btnImg, btnText].forEach(o => o.destroy())
+            if (this.joystickEl) this.joystickEl.style.display = ''
             this.retryCurrentAnimal()
         }
         btnImg.on('pointerdown', destroyAll)
