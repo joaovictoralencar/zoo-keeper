@@ -1,5 +1,5 @@
 import { Camera, Vector3 } from 'three'
-import { GAME_W, GAME_H } from '../constants'
+import { GAME_W, GAME_H } from '../EngineConstants'
 
 /**
  * Projects a Three.js world position to Phaser 2D screen coordinates.

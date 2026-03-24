@@ -1,10 +1,36 @@
 {
   "world": {
-    "bounds":          { "xMin": -15, "xMax": 20, "zMin": -12.5, "zMax": 4 },
+    "bounds":          { "xMin": -20, "xMax": 20, "zMin": -12.5, "zMax": 4 },
     "enclosureEntryZ": -2.8,
     "timerDuration":   20,
     "interactRange":   3.5,
-    "speed":           5
+    "speed":           6
+  },
+
+  "camera": {
+    "lerp":      0.1,
+    "offsetX":   2,
+    "offsetZ":   6,
+    "positionY": 6,
+    "lookAtY":  2.5
+  },
+
+  "bubbles": {
+    "actionW":   74,
+    "actionH":   74,
+    "purchaseW": 74,
+    "purchaseH": 88,
+    "radius":    16
+  },
+
+  "hud": {
+    "ringRadius": 32,
+    "edgeMargin": 58,
+    "topMargin":  70
+  },
+
+  "needs": {
+    "idleRate": 0.025
   },
 
   "environment": {
@@ -29,10 +55,13 @@
   },
 
   "player": {
-    "model":  "assets/character-male-e.glb",
-    "startX": -12,
-    "startZ": 0,
-    "scale":  1.5
+    "model":           "assets/character-male-e.glb",
+    "startX":          -12,
+    "startZ":          0,
+    "scale":           1.5,
+    "autoPickupRadius": 1.8,
+    "carryItemHeight":  0.35,
+    "animBlendRate":    6
   },
 
   "enclosures": [

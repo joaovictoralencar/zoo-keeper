@@ -8,6 +8,32 @@ export interface WorldConfig {
   speed:            number
 }
 
+export interface CameraConfig {
+  lerp:      number
+  offsetX:   number
+  offsetZ:   number
+  positionY: number
+  lookAtY:   number
+}
+
+export interface BubbleConfig {
+  actionW:   number
+  actionH:   number
+  purchaseW: number
+  purchaseH: number
+  radius:    number
+}
+
+export interface HudConfig {
+  ringRadius: number
+  edgeMargin: number
+  topMargin:  number
+}
+
+export interface NeedsConfig {
+  idleRate: number
+}
+
 export interface EnvironmentConfig {
   skyColor:             string
   groundColor:          string
@@ -30,10 +56,13 @@ export interface FenceConfig {
 }
 
 export interface PlayerConfig {
-  model:  string
-  startX: number
-  startZ: number
-  scale:  number
+  model:             string
+  startX:            number
+  startZ:            number
+  scale:             number
+  autoPickupRadius:  number
+  carryItemHeight:   number
+  animBlendRate:     number
 }
 
 export interface EnclosureConfig {
@@ -103,6 +132,10 @@ export interface TutorialConfig {
 
 export interface LevelData {
   world:       WorldConfig
+  camera:      CameraConfig
+  bubbles:     BubbleConfig
+  hud:         HudConfig
+  needs:       NeedsConfig
   environment: EnvironmentConfig
   fence:       FenceConfig
   player:      PlayerConfig

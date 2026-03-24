@@ -5,15 +5,10 @@ import {
     PerspectiveCamera, PlaneGeometry, SphereGeometry, Vector3,
 } from 'three'
 import {AnimalWander, AnimalAnimPair} from '../zoo/AnimalWander'
-import type {LevelData, AnimalConfig, EnclosureConfig, PhaseConfig} from '../types/LevelData'
+import type {LevelData, AnimalConfig, EnclosureConfig, PhaseConfig, BubbleConfig} from '../types/LevelData'
 import {
     GAME_W, GAME_H, FONT,
-    ACTION_BUBBLE_W, ACTION_BUBBLE_H, PURCHASE_BUBBLE_W, PURCHASE_BUBBLE_H, BUBBLE_RADIUS,
-    CAMERA_LERP, CAMERA_OFFSET_X, CAMERA_OFFSET_Z,
-    AUTO_PICKUP_RADIUS, CARRY_ITEM_HEIGHT,
-    HUD_RING_RADIUS, HUD_EDGE_MARGIN, HUD_TOP_MARGIN,
-    NEEDS_IDLE_RATE,
-} from '../constants'
+} from '../EngineConstants'
 import { projectToScreen, clampToScreenEdge } from '../utils/WorldUI'
 import { createActionBubble, createPurchaseBubble } from '../ui/BubbleFactory'
 import { AssetLoader } from '../utils/AssetLoader'
@@ -608,9 +603,11 @@ export default class GameScene extends Scene3D {
             let c: Phaser.GameObjects.Container
             if (item.id.endsWith('_purchase')) {
                 const cost = parseInt(item.bubbleLabel.replace('⭐', ''), 10)
-                c = createPurchaseBubble(this, cost)
+                const bc = this.ld.bubbles
+                c = createPurchaseBubble(this, cost, { w: bc.purchaseW, h: bc.purchaseH, r: bc.radius })
             } else {
-                c = createActionBubble(this, item.bubbleLabel, { iconKey: item.bubbleIcon })
+                const bc = this.ld.bubbles
+                c = createActionBubble(this, item.bubbleLabel, { iconKey: item.bubbleIcon, w: bc.actionW, h: bc.actionH, r: bc.radius })
             }
             c.on('pointerdown', () => { if (c.visible) item.action() })
             item.bubbleSprite = c
@@ -1008,12 +1005,12 @@ export default class GameScene extends Scene3D {
     }
 
     private _screenEdgeClamp(tx: number, ty: number, margin: number): {x: number; y: number; angle: number} {
-        return clampToScreenEdge(tx, ty, margin, GAME_W, GAME_H, HUD_TOP_MARGIN)
+        return clampToScreenEdge(tx, ty, margin, GAME_W, GAME_H, this.ld.hud.topMargin)
     }
 
     private updateAnimalHud() {
-        const RING_R = HUD_RING_RADIUS
-        const MARGIN = HUD_EDGE_MARGIN
+        const RING_R = this.ld.hud.ringRadius
+        const MARGIN = this.ld.hud.edgeMargin
         const phaseCfg = this.phaseManager.current
 
         for (const [animalId, hud] of this.animalHudItems) {
@@ -1163,8 +1160,6 @@ export default class GameScene extends Scene3D {
         const cam = this.third.camera as PerspectiveCamera
         cam.fov = 75
         cam.updateProjectionMatrix()
-        this.third.camera.position.set(-8, 5, 12)
-        this.third.camera.lookAt(-12, 0, 0)
     }
 
     private setupJoystick() {
@@ -1287,7 +1282,7 @@ export default class GameScene extends Scene3D {
         const pos = this.itemPositions.get(phaseCfg.requiredItem)
         if (!pos) return
         const px = this.player!.position.x, pz = this.player!.position.z
-        if (Math.hypot(px - pos.x, pz - pos.z) < AUTO_PICKUP_RADIUS) {
+        if (Math.hypot(px - pos.x, pz - pos.z) < this.ld.player.autoPickupRadius) {
             this.pickup(phaseCfg.requiredItem)
         }
     }
@@ -1368,10 +1363,11 @@ export default class GameScene extends Scene3D {
     private updateCamera() {
         if (!this.player) return
         const {x, y, z} = this.player.position
-        this.third.camera.position.x = MathUtils.lerp(this.third.camera.position.x, x + CAMERA_OFFSET_X, CAMERA_LERP)
-        this.third.camera.position.y = 5
-        this.third.camera.position.z = MathUtils.lerp(this.third.camera.position.z, z + CAMERA_OFFSET_Z, CAMERA_LERP)
-        this.third.camera.lookAt(x + CAMERA_OFFSET_X, y + 0.5, z)
+        const { lerp, offsetX, offsetZ, positionY, lookAtY } = this.ld.camera
+        this.third.camera.position.x = MathUtils.lerp(this.third.camera.position.x, x + offsetX, lerp)
+        this.third.camera.position.y = positionY
+        this.third.camera.position.z = MathUtils.lerp(this.third.camera.position.z, z + offsetZ, lerp)
+        this.third.camera.lookAt(x + offsetX, y + lookAtY, z)
     }
 
     private project(worldPos: Vector3): { x: number; y: number } {
@@ -1461,7 +1457,7 @@ export default class GameScene extends Scene3D {
         const px = this.player.position.x
         const pz = this.player.position.z
         const activeDrainRate = 1 / this.ld.world.timerDuration
-        const idleRate = NEEDS_IDLE_RATE
+        const idleRate = this.ld.needs.idleRate
         for (const animal of this.ld.animals) {
             const enc = this.ld.enclosures.find(e => e.id === animal.enclosureId)!
             const isLocked = animal.startLocked && !this.purchasedEnclosures.has(animal.enclosureId)

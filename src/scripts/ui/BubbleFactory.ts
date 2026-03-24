@@ -1,8 +1,4 @@
-import {
-    ACTION_BUBBLE_W, ACTION_BUBBLE_H,
-    PURCHASE_BUBBLE_W, PURCHASE_BUBBLE_H,
-    BUBBLE_RADIUS, FONT,
-} from '../constants'
+import { FONT } from '../EngineConstants'
 
 export interface ActionBubbleOptions {
     /** Phaser texture key for the icon image. Falls back to `label` as emoji text if absent. */
@@ -11,6 +7,12 @@ export interface ActionBubbleOptions {
     pointerKey?: string
     /** Call-to-action text shown above the pointer. Defaults to `'GIVE'`. */
     ctaText?: string
+    /** Bubble width in px. Defaults to 74. */
+    w?: number
+    /** Bubble height in px. Defaults to 74. */
+    h?: number
+    /** Corner radius in px. Defaults to 16. */
+    r?: number
 }
 
 export interface PurchaseBubbleOptions {
@@ -20,6 +22,12 @@ export interface PurchaseBubbleOptions {
     pointerKey?: string
     /** Call-to-action text shown above the pointer. Defaults to `'UNLOCK'`. */
     ctaText?: string
+    /** Bubble width in px. Defaults to 74. */
+    w?: number
+    /** Bubble height in px. Defaults to 88. */
+    h?: number
+    /** Corner radius in px. Defaults to 16. */
+    r?: number
 }
 
 /**
@@ -31,8 +39,8 @@ export function createActionBubble(
     label: string,
     options: ActionBubbleOptions = {},
 ): Phaser.GameObjects.Container {
-    const { iconKey, pointerKey = 'ui-pointer', ctaText = 'GIVE' } = options
-    const W = ACTION_BUBBLE_W, H = ACTION_BUBBLE_H, R = BUBBLE_RADIUS
+    const { iconKey, pointerKey = 'ui-pointer', ctaText = 'GIVE', w = 74, h = 74, r = 16 } = options
+    const W = w, H = h, R = r
 
     const shadow = scene.add.graphics()
     shadow.fillStyle(0x000000, 0.28)
@@ -71,8 +79,8 @@ export function createPurchaseBubble(
     cost: number,
     options: PurchaseBubbleOptions = {},
 ): Phaser.GameObjects.Container {
-    const { starKey = 'ui-star', pointerKey = 'ui-pointer', ctaText = 'UNLOCK' } = options
-    const W = PURCHASE_BUBBLE_W, H = PURCHASE_BUBBLE_H, R = BUBBLE_RADIUS
+    const { starKey = 'ui-star', pointerKey = 'ui-pointer', ctaText = 'UNLOCK', w = 74, h = 88, r = 16 } = options
+    const W = w, H = h, R = r
 
     const shadow = scene.add.graphics()
     shadow.fillStyle(0x000000, 0.28)
