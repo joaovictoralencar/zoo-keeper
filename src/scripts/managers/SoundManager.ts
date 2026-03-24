@@ -153,15 +153,12 @@ export class SoundManager {
         this.currentMusicKey = ''
     }
 
-    pauseMusic(): void  { this.currentMusic?.pause() }
-    resumeMusic(): void { this.currentMusic?.resume() }
-
     // ── VOLUME ────────────────────────────────────────────────────────────────
 
     setMusicVolume(v: number): void {
         this._musicVolume = Math.max(0, Math.min(1, v))
         if (this.currentMusic && !this._muted) {
-            (this.currentMusic as any).setVolume(this._musicVolume)
+            (this.currentMusic as Phaser.Sound.WebAudioSound).setVolume(this._musicVolume)
         }
     }
 
@@ -177,13 +174,13 @@ export class SoundManager {
     mute(): void {
         if (this._muted) return
         this._muted = true
-        if (this.currentMusic) (this.currentMusic as any).setVolume(0)
+        if (this.currentMusic) (this.currentMusic as Phaser.Sound.WebAudioSound).setVolume(0)
     }
 
     unmute(): void {
         if (!this._muted) return
         this._muted = false
-        if (this.currentMusic) (this.currentMusic as any).setVolume(this._musicVolume)
+        if (this.currentMusic) (this.currentMusic as Phaser.Sound.WebAudioSound).setVolume(this._musicVolume)
     }
 
     /** Toggles mute and returns the new muted state. */

@@ -38,10 +38,8 @@ export interface PlayerConfig {
 
 export interface EnclosureConfig {
   id:               string
-  phase:            string   // first phase that uses this enclosure
   centerX:          number
-  zoneXMin:         number
-  zoneXMax:         number
+  width:            number
   unlockCost:       number   // stars needed to unlock; 0 = starts purchased
   unlockRequires?:  string   // enclosure id that must be purchased first
 }
@@ -56,18 +54,18 @@ export interface AnimalConfig {
   startLocked: boolean
   wanderRadius: number
   moveSpeed:   number
-  emoji:       string
   count?:      number     // how many instances to spawn (default 1)
   scale?:      number     // extra uniform scale multiplier applied after normalisation
 }
 
 export interface ItemConfig {
   type:          string
+  enclosureId:   string          // item spawns at this enclosure's centerX
   model:         string | null
   scale:         number
-  position:      Vec3
-  bubbleIcon:    string | null   // texture key; null = use bubbleEmoji fallback
-  bubbleEmoji?:  string          // emoji fallback when bubbleIcon is null
+  positionY:     number
+  positionZ:     number
+  bubbleIcon:    string | null   // texture key; null = show no icon
   iconAsset:     string | null
   startVisible?: boolean
 }
@@ -99,14 +97,7 @@ export interface PropConfig {
   scale?: number
 }
 
-export interface TutorialStep {
-  gesture:  'tap' | 'swipe'
-  verb:     string
-  desc:     string
-}
-
 export interface TutorialConfig {
-  steps:         TutorialStep[]
   autoDismissMs: number
 }
 

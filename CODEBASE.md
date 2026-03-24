@@ -1,6 +1,6 @@
 # Zoo Keeper — Codebase Documentation
 > A deep-dive reference covering every system, why it matters, and how it all fits together.
-> Validated against source — corrections from first review are marked **[CORRECTED]**.
+> Last updated March 2026 — reflects all refactoring sessions completed to date.
 
 ---
 
@@ -20,8 +20,16 @@
    - 5.8 [Game-Loop Updaters](#58-game-loop-updaters)
    - 5.9 [Game Flow: Phases, Delivery, Fail & End](#59-game-flow-phases-delivery-fail--end)
 6. [Animal AI — `AnimalWander.ts`](#6-animal-ai--animalwanderts)
-7. [Asset Map](#7-asset-map)
-8. [Improvement Points for Future 3D Games](#8-improvement-points-for-future-3d-games)
+7. [Utility Modules](#7-utility-modules)
+   - 7.1 [Game Constants — `constants.ts`](#71-game-constants--constantsts)
+   - 7.2 [Asset Loader — `AssetLoader.ts`](#72-asset-loader--assetloaderts)
+   - 7.3 [World UI — `WorldUI.ts`](#73-world-ui--worlduits)
+   - 7.4 [Bubble Factory — `BubbleFactory.ts`](#74-bubble-factory--bubblefactoryts)
+8. [Audio System](#8-audio-system)
+   - 8.1 [Sound Manager — `SoundManager.ts`](#81-sound-manager--soundmanagerts)
+   - 8.2 [Audio Config — `AudioConfig.ts`](#82-audio-config--audioconfigts)
+9. [Asset Map](#9-asset-map)
+10. [Remaining Improvement Points](#10-remaining-improvement-points)
 
 ---
 
@@ -48,6 +56,30 @@ Webpack 5         — Bundles everything into the final HTML
 ```
 
 The hybrid approach (Phaser 2D overlay on top of a Three.js 3D scene) is one of enable3d's core value propositions. It means you write familiar Phaser UI code (`this.add.text`, tweens, input events) and Three.js 3D code side by side without bridging frameworks.
+
+**Project structure:**
+
+```
+src/scripts/
+  game.ts                         ← Phaser.Game config + enable3d bootstrap
+  constants.ts                    ← All magic numbers (sizes, speeds, radii)
+  scenes/
+    GameScene.ts                  ← Main 3D scene (~1650 lines)
+  types/
+    LevelData.ts                  ← TypeScript interfaces for level.json
+  zoo/
+    AnimalWander.ts               ← Kinematic wander AI + animation blending
+  utils/
+    AssetLoader.ts                ← GLTF cache with in-flight deduplication
+    WorldUI.ts                    ← 3D→2D projection + screen-edge clamping
+  ui/
+    BubbleFactory.ts              ← Factory for action and purchase bubbles
+  managers/
+    SoundManager.ts               ← Reusable audio service (music + SFX)
+    PhaseManager.ts               ← Phase state machine (current phase, advance, isDone)
+  config/
+    AudioConfig.ts                ← All audio volumes and timings in one place
+```
 
 ---
 
@@ -139,7 +171,7 @@ By being pure JSON, `level.json` functions as a **no-code level editor**. A desi
 ## 5. The Main Scene — `GameScene.ts`
 
 ```
-src/scripts/scenes/GameScene.ts   (~1603 lines)
+src/scripts/scenes/GameScene.ts   (~1650 lines)
 ```
 
 This is the heart of the project — the single Phaser scene that runs the entire game. It extends `Scene3D` from enable3d, which in turn extends `Phaser.Scene`, giving it access to both the Phaser API and the Three.js layer via `this.third`.
@@ -157,7 +189,7 @@ Loads all UI images via Phaser's asset pipeline. These are 2D PNG files used in 
 **Why it matters:** Splitting asset loading this way (Phaser assets in `preload`, GLTF in `create`) is forced by the framework's two-phase boot. Understanding this split prevents "texture not found" errors.
 
 #### `async create()`
-The main setup method. Runs sequentially (top to bottom) and `await`s at every async operation. The full order, as found in the source:
+The main setup method. The full order, as found in the source:
 
 ```
 1.  Load level.json → this.ld
@@ -166,22 +198,28 @@ The main setup method. Runs sequentially (top to bottom) and `await`s at every a
 4.  Lazy-load dynamic icon textures declared in items[] and phases[]
 5.  this.third.warpSpeed()   — init Three.js scene, camera, lights
 6.  buildEnvironment()       — ground, path, enclosure floors
-7.  loadFences()             — fence GLB instances
-8.  loadPlayer()             — character GLB + animations
-9.  loadAnimals()            — all animal GLBs in parallel
-10. loadItems()              — pickup item GLBs
-11. loadProps()              — decorative scene props
-12. Init animalNeeds to 1.0 for all animals
-13. Hide items belonging to still-locked enclosures
-14. setupInteractables()     — build interaction bubble objects
-15. setupCamera()            — position and configure PerspectiveCamera
-16. setupJoystick()          — create DOM joystick
-17. setupUI()                — prestige bar, HUD, star counter
-18. needsDrainActive = true  — start the timer system
-19. _showTutorial()          — overlay tutorial hint
+7.  Promise.all([            — all five load methods run IN PARALLEL:
+      loadFences()           —   fence GLB instances
+      loadPlayer()           —   character GLB + animations
+      loadAnimals()          —   all animal GLBs
+      loadItems()            —   pickup item GLBs
+      loadProps()            —   decorative scene props
+    ])
+8.  Init animalNeeds to 1.0 for all animals
+9.  Hide items belonging to still-locked enclosures
+10. setupInteractables()     — build interaction bubble objects
+11. setupCamera()            — position and configure PerspectiveCamera
+12. setupJoystick()          — create DOM joystick
+13. setupUI()                — prestige bar, HUD, star counter
+14. Init SoundManager (this.sfx) — create pre-loaded footstep sounds
+15. Start BGM with fade-in
+16. needsDrainActive = true  — start the timer system
+17. _showTutorial()          — overlay tutorial hint
 ```
 
-**Why it matters:** The serial order means nothing renders until the slowest `await` resolves. Moving to parallel `Promise.all` for independent loads would speed up startup (see Improvement Points §8.2).
+**Why the `Promise.all` matters:** Steps 7a–7e are fully independent — none reads data written by another. Running them in parallel means total load time equals the slowest single load, rather than their sum. On a slow connection this could be a 3–4× faster startup.
+
+**Why it matters (SoundManager init order):** The SoundManager and pre-created footstep sounds are initialised after all assets are loaded. This ensures Phaser's audio context is warm and the keys are registered before any sound is played.
 
 #### `update(_time, delta)`
 Called every frame by Phaser. `delta` is milliseconds since the last frame; it's immediately converted to seconds (`dt = delta / 1000`) for physics-friendly math. Every per-frame system is called here as a named method — movement, camera, UI, AI, etc.
@@ -199,7 +237,7 @@ Procedurally builds the ground plane, path strip, and per-enclosure sand floors 
 
 #### `loadFences()`
 This method is the most geometrically complex setup routine. It:
-1. Loads the fence GLB once
+1. Loads the fence GLB via `AssetLoader.loadGltf()` (cached — only one HTTP request even if called again)
 2. Measures the GLB's bounding box to find the pivot offset (`pivZ`)
 3. For each enclosure, tiles fence panels around a rectangular perimeter:
    - South row (facing player): skips `gatePanels` in the centre to create a walkable opening
@@ -221,16 +259,15 @@ Loads the player character GLB, attaches it to the Three.js scene, and creates a
 The most optimised loading routine in the codebase. It builds a flat queue of all animal instances, then fires all `gltf` loads **in parallel** via `Promise.all`. This means 9 animals (5 monkeys + 3 elephants + 1 lion) load simultaneously rather than sequentially.
 
 After loading, each instance is:
+- Cloned via `gltf.scene.clone(true)` before being placed — **critical** because the AssetLoader caches the original scene; placing it directly would move the same node rather than create a new instance
 - Position-spread across the enclosure width using linear interpolation
 - Normalized to a `targetHeight` (see `normalizeAnimalHeight`)
 - Given an `AnimalWander` AI instance with bounds matching its enclosure
-- Given a `staticAction` + `walkAction` mixer pair (blended each frame based on `w.isMoving`)
+- Given a `staticAction` + `walkAction` mixer pair passed into `AnimalWander` — blending is handled inside the AI class itself (see §6)
 
-**[CORRECTED] Locked animals:** Animals with `startLocked: true` are set to `group.visible = false` immediately after loading — they are simply hidden in 3D. The perceived "silhouette" effect comes entirely from the 2D HUD layer, where the animal's portrait is dark-tinted and a padlock icon is rendered on top (see `createAnimalHudItems`). There are two dead-code methods `lockAnimal()` and `unlockAnimal()` (lines 422–439) that implement a material-swap approach but are **never called** anywhere in the codebase. When an enclosure is purchased, the 3D group is made visible again via `g.visible = true` in `purchaseEnclosure`.
+**The `.clone(true)` rule:** The AssetLoader cache stores the *template* gltf. Every placement must call `gltf.scene.clone(true)` to get a new, independent Three.js `Group`. Failing to do this means Three.js moves the single node to the last position — all but one instance silently disappear.
 
-**Why it matters:** Knowing the actual lock mechanism (visibility toggle, not material swap) is important for extending it — for example, adding a "reveal animation" would mean animating from `visible = false → true`, not reversing a material swap.
-
-**Why it matters (Promise.all):** The `Promise.all` pattern is the correct way to load many assets concurrently. Sequential `await` inside a loop would multiply load time by the number of animals.
+**Locked animals:** Animals with `startLocked: true` are set to `group.visible = false` immediately after loading. The perceived "silhouette" effect comes from the 2D HUD layer, where the portrait is dark-tinted with a padlock icon. When an enclosure is purchased, `purchaseEnclosure()` sets `g.visible = true` with a staggered reveal animation.
 
 #### `normalizeAnimalHeight(group, targetHeight)`
 Measures the bounding box of a loaded GLB, computes the scale factor needed to reach `targetHeight` world units, applies it, then repositions `y` so the model sits exactly on the ground plane.
@@ -242,7 +279,7 @@ Measures the bounding box of a loaded GLB, computes the scale factor needed to r
 ### 5.4 Items & Props
 
 #### `loadItems()`
-Loads each item GLB and places it at its world-space position from `level.json`. If the GLB fails to load, `_fallbackMesh()` creates a simple coloured sphere so the game remains playable even with missing assets.
+Loads each item GLB via `AssetLoader.loadGltf()` and places it at its world-space position from `level.json`. Each instance calls `.clone(true)` on the cached scene. If the GLB fails to load, `_fallbackMesh()` creates a simple coloured sphere so the game remains playable even with missing assets.
 
 **Why it matters:** The fallback pattern means a broken or missing asset doesn't crash the game — critical for a playable ad where you have no control over CDN caching behaviour.
 
@@ -252,9 +289,9 @@ Every in-world item that isn't being carried gently bobs up and down using `Math
 **Why it matters:** Animated items dramatically improve discoverability — players notice motion in a 3D scene far more readily than static objects.
 
 #### `loadProps()`
-Loads decorative environment props (benches, trash cans, trees, hay bales, rocks, pine trees) from `level.json`. Uses a model cache (`Map<string, Group | null>`) so that repeated models (e.g. 8 pine trees) only make one `gltf` load call.
+Loads decorative environment props (benches, trash cans, trees, hay bales, rocks, pine trees) from `level.json`. All calls go through `AssetLoader.loadGltf()`, which provides automatic deduplication — repeated models (e.g. 8 pine trees) trigger only one HTTP request. Each instance calls `gltf.scene.clone(true)` to get its own independent copy.
 
-**Why it matters:** The cache pattern turns O(n) GLTF loads into O(unique models) — critical for build size since each `gltf.scene.clone(true)` copies geometry references, not geometry data.
+**Why it matters:** The AssetLoader cache turns O(n) GLTF loads into O(unique models). `gltf.scene.clone(true)` copies geometry *references* (not geometry data), so placing 8 pine trees costs only one actual geometry allocation in GPU memory.
 
 ---
 
@@ -292,9 +329,11 @@ Called every frame. For each interactable:
 **Why it matters:** The `prevBubbleVisible` diff check is crucial — without it, `_showBubble` and `_hideBubble` would fire every frame, creating a storm of competing tweens.
 
 #### `_showBubble(item)` / `_hideBubble(item)`
-Animates bubbles in and out with spring-style tweens (`Back.easeOut` pop-in, `Quad.easeIn` pop-out). After popping in, a continuous "wiggle" tween rocks the bubble ±8°.
+Animates bubbles in and out with spring-style tweens (`Back.easeOut` pop-in, `Quad.easeIn` pop-out). After popping in, a continuous "wiggle" tween rocks the bubble ±8°. When a bubble pops in, `sfx-whoosh` plays via the SoundManager — a short audio confirmation that reinforces the visual pop.
 
-**Why it matters:** The scale-from-zero pop-in is the standard mobile game "tap me" signal. The continuous wiggle keeps drawing the player's eye. These micro-animations are what separate polished playable ads from flat ones.
+**Why it matters:** The scale-from-zero pop-in is the standard mobile game "tap me" signal. The continuous wiggle keeps drawing the player's eye. The whoosh sound adds a satisfying tactile layer to the visual cue. These micro-animations are what separate polished playable ads from flat ones.
+
+Bubbles are created by `BubbleFactory` functions (`createActionBubble`, `createPurchaseBubble`) — see §7.4.
 
 #### `project(worldPos)`
 Converts a Three.js `Vector3` (3D world position) to a Phaser 2D screen position. Uses Three.js's built-in `vector.project(camera)` which maps to NDC [-1,1], then scales to pixel coordinates.
@@ -330,7 +369,9 @@ Floating animal portraits positioned above each enclosure in world space (via `p
 #### Star HUD (`setupStarHud`, `flyStars`, `updateStarHud`)
 A star counter in the top-right corner. When stars are awarded, `flyStars` spawns exactly **5 visual star sprites** (regardless of the actual count) that fly from the delivery point to the HUD counter, while a "+N" popup springs up from the delivery point. The counter ticks up proportionally as each star arrives. The HUD pops with a `Back.easeOut` scale bounce on update.
 
-**Why it matters:** Earning currency needs to *feel* rewarding. The animated fly-to-HUD pattern (copied from every top mobile game) makes the reward moment tactile and satisfying, which is critical for a playable ad — the feeling of reward is what drives installs.
+Each star plays `sfx-coin` the moment it lands on the HUD. The playback **rate** rises linearly from 0.9 on the first star to 1.1 on the last, creating a classic ascending ding-ding-ding collect jingle without needing multiple audio files.
+
+**Why it matters:** Earning currency needs to *feel* rewarding. The animated fly-to-HUD pattern (copied from every top mobile game) makes the reward moment tactile and satisfying, which is critical for a playable ad — the feeling of reward is what drives installs. The ascending coin pitch is the audio equivalent of the visual scale bounce.
 
 #### Pickup Arrows (`createPickupArrows`, `updatePickupArrows`)
 A bouncing arrow image floats above the current phase's required item, pointing at it. It only appears for the item the player currently needs and disappears once picked up. The arrow Y position gets a bob offset from `Math.sin(elapsedTime * 3.5) * 0.12` synced to the item's wander.
@@ -351,7 +392,9 @@ Reads `this.moveData` (populated by the joystick) and moves the player by `right
 
 Player position is hard-clamped to `bounds` from `level.json` every frame.
 
-**Why it matters:** Multiplying by `dt` (delta time in seconds) makes movement frame-rate independent. Without this, the game would run twice as fast on a 120Hz phone as on a 60Hz one. The hard clamp prevents players from walking off the edge of the world.
+Footstep sounds are **pre-created** in `create()` as three `Phaser.Sound.BaseSound` objects (one per variant, all looping). On movement start, one is picked at random and `.play()` called directly on the object. On movement stop, `.stop()` is called on the same reference. This is more reliable than `SoundManager.playSfx({ loop: true })` because it guarantees a stoppable reference even if the audio context was locked at play time.
+
+**Why it matters:** Multiplying by `dt` makes movement frame-rate independent. Pre-creating sounds ensures footsteps never "run away" (play with no reference to stop them), which was the bug in the previous `playSfx`-based approach.
 
 #### `updateCarryStack()`
 Positions carried items above the player's head in a vertical stack with a subtle bob offset. Items float at `y = playerY + 2 + index * 0.6 + sin(time)`.
@@ -398,28 +441,46 @@ All of these are called every frame from `update()`:
 
 ### 5.9 Game Flow: Phases, Delivery, Fail & End
 
-#### Phase State Machine
-The game has a single string `this.phase` that acts as a state machine token:
+#### Phase State Machine — `PhaseManager`
+Phase state is owned by `PhaseManager` (`managers/PhaseManager.ts`), not a raw string:
 
 ```
 'monkey'  →  'elephant'  →  'lion_toy'  →  'lion_food'  →  'done'
 ```
 
-All conditional logic reads from `this.phase`. Phase definitions live in `level.json` so the state machine implicitly extends when new phases are added to the JSON.
+```typescript
+this.phaseManager = new PhaseManager(this.ld.phases)
+this.phaseManager.currentId    // 'monkey' | 'elephant' | ...
+this.phaseManager.current      // PhaseConfig | null
+this.phaseManager.isDone       // true when past last phase
+this.phaseManager.advance()    // move to the next phase
+```
 
-**Why it matters:** A single phase string is the simplest possible state machine. It's easy to serialize, easy to debug (just log it), and level.json-driven so no code changes are needed to add phases.
+Phase definitions still live in `level.json` — the state machine extends automatically when new phases are added there, no code change required.
 
-#### `deliver(type, phaseId)` + `onDelivery()`
-`deliver` removes the item from the carry stack and calls `onDelivery`. `onDelivery` is the main branching method:
-- Triggers success FX (bounce, hearts, stars)
-- Resets active animal needs to full; marks it in `fedAnimals` (permanently stops its drain)
-- Advances prestige only when `!onComplete.showItemType && onComplete.starsAwarded` (i.e. not for intermediate steps)
-- Checks `PhaseOnComplete` to decide what happens next:
-  - `showItemType`: reveal a hidden item and advance to `nextPhase`
-  - `endGame`: disable needs drain and call `showEndcard` after 1800ms
-  - Default: just advance to `nextPhase`
+**Why it matters:** Wrapping the string in a class makes the state machine inspectable, testable, and a single source of truth. `isDone` and `current` are computed properties with null-safety, eliminating scattered `=== 'done'` checks across the codebase.
 
-**Why it matters:** Keeping delivery and phase-advance logic in `onDelivery` means all consequence logic is in one place. The `PhaseOnComplete` data structure is an extension point — future phases can add new completion actions without restructuring the method.
+#### `deliver(type, phaseId)` + `onDelivery()` + `_setupDeliveryListeners()`
+`deliver` removes the item from the carry stack and calls `onDelivery`. `onDelivery` now does exactly two things:
+1. Advances `phaseManager` to the next phase
+2. Emits `delivery:success` with a `DeliveryPayload` (the completed phase config, enclosure, and model groups)
+
+All consequences are handled by five focused listeners registered in `_setupDeliveryListeners()` (called once from `create()`):
+
+| Listener | Responsibility |
+|---|---|
+| `delivery:sfx` | Plays animal cheer + success FX |
+| `delivery:visual` | Triggers bounce, hearts, stars with ascending coin jingle |
+| `delivery:stars` | Calls `flyStars()` if `starsAwarded > 0` |
+| `delivery:state` | Resets needs, marks `fedAnimals`, advances prestige |
+| `delivery:transition` | Handles `showItemType`, `endGame`, or phase timer activation |
+
+**Why it matters:** `onDelivery` shrinks from ~55 lines to ~10. Adding a new delivery consequence (haptics, analytics, a new animation) is a new `events.on` listener — existing code is untouched. Each listener is individually readable and testable.
+
+#### `purchaseEnclosure(encId)`
+Deducts stars and unlocks an enclosure. Includes a **double-purchase guard**: the enclosure ID is added to `purchasedEnclosures` as the very first action — before any star deduction. Any subsequent call (e.g. rapid double-tap) hits `if (this.purchasedEnclosures.has(encId)) return` and exits immediately. If somehow stars are insufficient (edge case), the ID is removed from the set and the HUD shakes.
+
+**Why it matters:** Without this guard, rapid tapping could fire `purchaseEnclosure` twice in the same frame — both calls would pass the star-count check before either had time to deduct. The "reserve first, validate second" pattern is the correct fix: atomically claim the resource before doing any accounting.
 
 #### `updateNeeds(dt)` / `onTimerExpired()`
 **[CORRECTED] `updateNeeds` iterates over ALL animals every frame**, not just the active one. Two drain rates apply:
@@ -438,22 +499,23 @@ Resets the current phase: drops carried items, reverts two-step phases (e.g. `li
 **Why it matters:** A gentle retry (no full restart) keeps players in the experience. Restarting from scratch after failing one animal would be too punishing for an ad context — players would just close it.
 
 #### `showEndcard()`
-Builds the full-screen CTA (call-to-action) panel: background illustration, game logo, panel card, giraffe teaser, "NEW ANIMAL UNLOCKED" text, and a pulsing "PLAY NOW!" button. All elements animate in with a staggered sequence (panel slides up → logo drops in → giraffe punches in → button pulses).
+Builds the full-screen CTA (call-to-action) panel: background illustration, game logo, panel card, giraffe teaser, "NEW ANIMAL UNLOCKED" text, and a pulsing "PLAY NOW!" button. All elements animate in with a staggered sequence (panel slides up → logo drops in → giraffe punches in → button pulses). The win SFX plays and the BGM fades out when endcard triggers.
 
-**[CORRECTED] ⚠️ The CTA button is currently a stub.** The `pointerdown` handler only does:
+The CTA button is wired to the standard ad-network redirect pattern:
 ```typescript
-.on('pointerdown', () => console.log('CTA → store redirect'))
+if (typeof window.onCTATapped === 'function') window.onCTATapped()  // ad network hook
+else window.open('https://play.google.com/store/apps/details?id=...', '_blank')
 ```
-The actual store/app-store redirect is **not implemented**. This must be replaced before shipping the ad.
+Before shipping, replace the placeholder store URL with the real app URL.
 
-**Why it matters:** The endcard is the entire *point* of the playable ad — converting viewers into installs. The giraffe teaser ("see what you could unlock") and achievement copy exploit the FOMO (fear of missing out) psychology that mobile game UA is built on. A broken CTA means zero installs regardless of how good the game is.
+**Why it matters:** The endcard is the entire *point* of the playable ad — converting viewers into installs. The giraffe teaser ("see what you could unlock") and achievement copy exploit the FOMO (fear of missing out) psychology that mobile game UA is built on.
 
 ---
 
 ## 6. Animal AI — `AnimalWander.ts`
 
 ```
-src/scripts/zoo/AnimalWander.ts   (150 lines)
+src/scripts/zoo/AnimalWander.ts   (168 lines)
 ```
 
 A standalone, physics-free kinematic AI class for animals. It is completely decoupled from Phaser and Three.js scene internals — it receives a `Group` reference and a config, then moves the group each frame.
@@ -471,39 +533,293 @@ WAITING: play idle bounce (|sin| wave on Y), count down wait timer
 
 ### Key methods
 
-#### `constructor(entity, config)`
-Saves the entity reference and records `entity.position.clone()` as `this.origin`. This origin point is the centre of the animal's wander zone — all waypoints are relative to it.
+#### `constructor(entity, config, anims?)`
+Saves the entity reference and records `entity.position.clone()` as `this.origin`. The optional third parameter is an `AnimalAnimPair`:
 
-**Why it matters:** Saving the origin at construction time means each animal wanders around its spawn point regardless of where it was placed. Moving an animal just by changing its spawn position in `level.json` automatically updates its wander center.
+```typescript
+interface AnimalAnimPair {
+  staticAction: AnimationAction  // idle/static clip
+  walkAction:   AnimationAction  // walk clip
+}
+```
+
+When provided, both actions are started immediately (both playing, `walkAction.weight = 0`) so cross-fading can begin from the first frame. The blend is driven inside `update()` — GameScene doesn't need to touch animation weights at all.
+
+**Why it matters:** Co-locating animation blending with movement logic means an AI state change (`waiting → moving`) and its animation consequence happen atomically in the same frame. When blending lived in GameScene's update loop instead, it was possible for the AI state and the animation weight to briefly disagree.
 
 #### `pickNewTarget(towardOrigin?)`
 Picks a random point within `wanderRadius` of the origin. If the optional `towardOrigin` vector is passed (used when a boundary is hit), the angle is biased back toward origin with ±90° randomness — a "soft bounce" that prevents animals from immediately running back to the wall.
 
-**Why it matters:** The boundary-biased angle is what makes the wander feel natural. A purely random bounce would cause animals to instantly re-hit the same wall. The bias creates organic turning-away behavior.
-
 #### `clampTarget(v)`
-Applies rectangular hard bounds (`xMin/xMax/zMin/zMax`) to a target position. Used so animals never step outside their enclosure regardless of the wander radius.
-
-**Why it matters:** The enclosure fences are visual-only (no physics). This clamp is the substitute collision system. Without it, animals would wander through fence panels.
+Applies rectangular hard bounds (`xMin/xMax/zMin/zMax`) to a target position. Used so animals never step outside their enclosure regardless of the wander radius. The enclosure fences are visual-only (no physics) — this clamp is the substitute collision system.
 
 #### `update(dt)`
 The per-frame driver. In the MOVING state it steps the position toward the target, rotates the entity to face the direction of travel (`Math.atan2(dir.x, dir.z)`), and checks for waypoint arrival and boundary overrun. In the WAITING state it drives an idle bounce via `Math.abs(Math.sin(jumpTime))`.
 
-**Why it matters:** The `Math.abs(Math.sin(...))` bounce creates a "double bounce" pattern (the abs folds the negative half up) — subtle but it reads as a more organic idle than a pure sine. The facing rotation (`atan2`) is the minimal-code way to make an entity face its direction of travel in 3D without a full LookAt operation.
-
-### `isMoving` getter
-Returns `true` when `!this.waiting && !!this.target`. GameScene uses this every frame to blend the animal's walk animation weight in/out:
+At the end of every `update` call, if `anims` was provided, the walk/idle blend is smoothly driven:
 ```typescript
-const target = w.isMoving ? 1 : 0
-const next   = cur + (target - cur) * Math.min(1, dt * 6)
-anim.walkAction.setEffectiveWeight(next)
+const target = this.isMoving ? 1 : 0
+animBlend += (target - animBlend) * BLEND_RATE * dt   // BLEND_RATE = 6
+staticAction.weight = 1 - animBlend
+walkAction.weight   = animBlend
 ```
 
-**Why it matters:** The `dt * 6` lerp factor (~6x per second convergence) means the blend takes ~0.17 seconds, creating a natural transition between idle and walk animations that doesn't snap.
+The `BLEND_RATE = 6` constant lives as a `private static` inside `AnimalWander` — it's an AI detail, not a game-wide tunable.
+
+**Why it matters:** The `Math.abs(Math.sin(...))` bounce creates a "double bounce" pattern (the abs folds the negative half up) — subtle but it reads as a more organic idle than a pure sine. The `dt * 6` lerp means the blend takes ~0.17 seconds, creating a natural transition without snapping.
+
+### `isMoving` getter
+Returns `true` when `!this.waiting && !!this.target`. Useful for external callers (e.g. the game loop) that need to know the current movement state without reaching into internals.
 
 ---
 
-## 7. Asset Map
+## 7. Utility Modules
+
+These are standalone modules extracted from GameScene. Each can be dropped into any future Phaser 3 + enable3d project without modification.
+
+---
+
+### 7.1 Game Constants — `constants.ts`
+
+```
+src/scripts/constants.ts   (32 lines)
+```
+
+Single source of truth for all magic numbers used across more than one file. Importing from here instead of hardcoding values means tuning the game feel (camera lag, pickup radius, HUD sizes) is a single-file edit.
+
+| Constant | Value | Role |
+|---|---|---|
+| `GAME_W` / `GAME_H` | 540 / 960 | Canvas pixel dimensions |
+| `FONT` | `"Baloo 2", sans-serif` | All Phaser text elements |
+| `ACTION_BUBBLE_W/H` | 74 × 74 | Action bubble container size |
+| `PURCHASE_BUBBLE_W/H` | 74 × 88 | Purchase bubble container size |
+| `BUBBLE_RADIUS` | 16 | Rounded corner radius for bubbles |
+| `CAMERA_LERP` | 0.1 | Camera follow smoothing (~10 frames to catch up) |
+| `CAMERA_OFFSET_X/Z` | 2 / 10 | Camera leads player on X, trails on Z |
+| `AUTO_PICKUP_RADIUS` | 1.8 | World units — item auto-collected within this distance |
+| `CARRY_ITEM_HEIGHT` | 0.35 | Normalised height for items in the carry stack |
+| `ANIM_BLEND_RATE` | 6 | Walk↔idle blend convergence multiplier (× dt) |
+| `HUD_RING_RADIUS` | 32 | Pixel radius of the animal needs ring |
+| `HUD_EDGE_MARGIN` | 58 | Pixels from screen edge for off-screen HUD indicators |
+| `HUD_TOP_MARGIN` | 70 | Pixels below prestige bar reserved for top clamp |
+| `NEEDS_IDLE_RATE` | 0.025 | Needs drain per second for non-active unlocked animals |
+
+**Why it matters for future games:** Copy this file into any new project and replace values. Every system that imports these constants adjusts automatically — no grep-and-replace required.
+
+---
+
+### 7.2 Asset Loader — `AssetLoader.ts`
+
+```
+src/scripts/utils/AssetLoader.ts   (68 lines)
+```
+
+A thin GLTF loading service with three-layer deduplication:
+
+| Layer | Mechanism | Purpose |
+|---|---|---|
+| Cache | `Map<path, gltf>` | Returns resolved gltf immediately on repeat calls |
+| In-flight | `Map<path, Promise>` | Multiple concurrent requests for same path share one fetch |
+| Failed | `Set<path>` | Known-bad paths return `null` immediately — no retry spam in console |
+
+```typescript
+const loader = new AssetLoader(this.third)
+
+// Single load:
+const gltf = await loader.loadGltf('assets/pets/animal-monkey.glb')
+const group = gltf.scene.clone(true)   // ← always clone!
+
+// Batch parallel:
+const gltfs = await loader.loadManyGltf(['a.glb', 'b.glb', 'c.glb'])
+```
+
+**The `.clone(true)` contract:** `loadGltf` returns the *cached template* gltf — the same object every time for a given path. Every placement in the Three.js scene must call `gltf.scene.clone(true)` to get an independent `Group`. Placing the template directly would move the single node to each new position in sequence, leaving only the last one visible.
+
+**Why it matters for future games:** Drop `AssetLoader` in, replace all `this.third.load.gltf()` calls, and get deduplication + error safety for free. The in-flight map is especially valuable when multiple systems load the same model at startup — only one HTTP request fires regardless of how many `await loadGltf(samePath)` calls are made concurrently.
+
+---
+
+### 7.3 World UI — `WorldUI.ts`
+
+```
+src/scripts/utils/WorldUI.ts   (41 lines)
+```
+
+Two pure functions for bridging the 3D and 2D coordinate systems.
+
+#### `projectToScreen(worldPos, camera, w?, h?)`
+Projects a Three.js `Vector3` to Phaser pixel coordinates. Uses `vector.project(camera)` (NDC [-1,1]) then scales to pixels:
+```typescript
+{ x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h }
+```
+`w` and `h` default to `GAME_W`/`GAME_H` for convenience.
+
+#### `clampToScreenEdge(tx, ty, margin, w?, h?, topMargin?)`
+Takes a projected screen point that may be off-screen and returns the nearest on-screen edge position plus the angle toward the original point. Used for off-screen HUD indicators — the angle drives the rotation of the directional arrow.
+
+**Why it matters for future games:** Every 3D game with a 2D overlay needs these two functions. Placing them in a standalone module means you never re-derive the NDC-to-pixel formula — a common source of subtle bugs.
+
+---
+
+### 7.4 Bubble Factory — `BubbleFactory.ts`
+
+```
+src/scripts/ui/BubbleFactory.ts   (104 lines)
+```
+
+Two factory functions that build Phaser `Container` hierarchies for the interaction bubbles. Both accept an options bag with sensible defaults so call sites only pass what differs.
+
+#### `createActionBubble(scene, label, options?)`
+White rounded-rect bubble with an icon (or emoji fallback), a pulsing tap-pointer, and a CTA label.
+
+```typescript
+export interface ActionBubbleOptions {
+  iconKey?:    string   // Phaser texture key — falls back to `label` emoji if absent
+  pointerKey?: string   // Default: 'ui-pointer'
+  ctaText?:    string   // Default: 'GIVE'
+}
+```
+
+#### `createPurchaseBubble(scene, cost, options?)`
+Gold rounded-rect bubble with a star icon, cost number, pulsing tap-pointer, and a CTA label.
+
+```typescript
+export interface PurchaseBubbleOptions {
+  starKey?:    string   // Default: 'ui-star'
+  pointerKey?: string   // Default: 'ui-pointer'
+  ctaText?:    string   // Default: 'UNLOCK'
+}
+```
+
+Both functions return an invisible, zero-scale, interactive `Container` — `_showBubble` / `_hideBubble` in GameScene handle its lifecycle.
+
+**Why it matters for future games:** Bubble visuals are completely decoupled from game logic. To use a different pointer sprite or CTA text, pass it in the options bag. To create a third bubble type (e.g. "TALK"), add a new factory function — no GameScene methods to modify.
+
+---
+
+## 8. Audio System
+
+---
+
+### 8.1 Sound Manager — `SoundManager.ts`
+
+```
+src/scripts/managers/SoundManager.ts   (231 lines)
+```
+
+A reusable audio service for Phaser 3 games. Wraps Phaser's sound system with two independent categories:
+
+- **Music** — one background track at a time, optional fade in/out, cross-fade support
+- **SFX** — fire-and-forget effects, optional loop, playback rate control
+
+```typescript
+// Setup (in create()):
+this.sfx = new SoundManager(this, { musicVolume: 0.25, sfxVolume: 0.85 })
+
+// Music:
+this.sfx.playMusic('bgm', { fadeIn: 1500 })
+this.sfx.stopMusic(800)           // fade out over 800ms
+
+// SFX:
+this.sfx.playSfx('pickup')
+this.sfx.playSfx('sfx-coin', { volume: 0.7, rate: 1.1 })
+
+// Mute toggle (e.g. for a settings button):
+this.sfx.toggleMute()
+
+// Cleanup:
+this.sfx.destroy()   // call from scene shutdown()
+```
+
+**Important — field naming:** In GameScene the field is named `this.sfx`, **not** `this.sound`. Phaser.Scene has a built-in `sound` property (its own SoundManager). Naming the field `sound` causes TypeScript errors and silent shadowing.
+
+**`playSfx` return type guard:** `scene.sound.play()` returns `boolean | BaseSound` — it returns `false` in `NoAudioSoundManager` (e.g. when the audio context is locked). `playSfx` checks `typeof result === 'boolean'` before returning, so it always returns `BaseSound | null`. Callers can safely call `.stop()` on the return value without a crash.
+
+#### Audio wired in Zoo Keeper
+
+| Event | Sound key | Notes |
+|---|---|---|
+| BGM start | `bgm` | Fade in 1500ms, loops |
+| Player walks | `sfx-footstep-1/2/3` | Random variant, pre-created, looping |
+| Bubble pop-in | `sfx-whoosh` | Via `_showBubble` |
+| Delivery | `sfx-monkey/elephant/lion` | Phase-specific cheer |
+| Star lands on HUD | `sfx-coin` | Per-star, rate rises 0.9→1.1 |
+| Enclosure purchase | `sfx-coin` | At full volume |
+| End card | `sfx-win` + BGM fade-out | Triggered in `showEndcard` |
+
+**Why it matters for future games:** Drop `SoundManager` in, instantiate it in `create()`, and get music fading, SFX volume control, and mute toggle with no extra code. All Phaser audio quirks (return type, NoAudioSoundManager, context lock) are handled internally.
+
+---
+
+### 8.2 Audio Config — `AudioConfig.ts`
+
+```
+src/scripts/config/AudioConfig.ts   (33 lines)
+```
+
+**The only file you need to edit to adjust audio volumes.** All volume values and timing constants are centralised here — nothing is hardcoded in GameScene.
+
+```typescript
+export const AudioConfig = {
+    master: {
+        music: 0.25,   // BGM overall level
+        sfx:   0.85,   // All SFX overall level
+    },
+    sfx: {
+        footstep: 0.20,  // Looping walk sound
+        whoosh:   1.0,   // Bubble pop-in
+        animal:   0.75,  // Delivery cheer
+        coin:     1.0,   // Enclosure purchase
+        coinStar: 0.7,   // Per-star coin ding
+        win:      1.0,   // End-card fanfare
+    },
+    timing: {
+        musicFadeIn:  1500,  // ms
+        musicFadeOut:  800,  // ms
+    },
+}
+```
+
+**Quick tuning reference:**
+
+| Want to change | Edit |
+|---|---|
+| Music too loud/quiet | `master.music` |
+| All SFX too loud/quiet | `master.sfx` |
+| Footsteps specifically | `sfx.footstep` |
+| Bubble whoosh | `sfx.whoosh` |
+| Delivery/purchase coin | `sfx.coin` |
+| Per-star collect jingle | `sfx.coinStar` |
+| Animal cheer | `sfx.animal` |
+| Win fanfare | `sfx.win` |
+| BGM fade duration | `timing.musicFadeIn/Out` |
+
+---
+
+### 8.3 Phase Manager — `PhaseManager.ts`
+
+```
+src/scripts/managers/PhaseManager.ts   (~55 lines)
+```
+
+Owns the phase state machine. Replaces the raw `private phase = 'monkey'` string that previously lived directly in `GameScene`.
+
+```typescript
+this.phaseManager = new PhaseManager(this.ld.phases)
+
+this.phaseManager.currentId   // 'monkey' | 'elephant' | ...
+this.phaseManager.current     // PhaseConfig | null (null when done)
+this.phaseManager.isDone      // true when past the last phase
+this.phaseManager.advance()   // move to the next phase
+this.phaseManager.findById(id)
+this.phaseManager.indexOf(id)
+```
+
+**Why it matters:** A raw string can't enforce valid transitions, has no null-safety, and needs string comparisons scattered everywhere. Wrapping it in a class centralises all phase logic, makes `isDone` a safe computed property, and lets future games drop in a `PhaseManager` with their own phase list.
+
+---
+
+## 9. Asset Map
 
 ### 3D Models (GLB)
 | File | Used for |
@@ -550,227 +866,51 @@ anim.walkAction.setEffectiveWeight(next)
 | `assets/ui/turkey.png` + `assets/food/icons/turkey.png` | Delivery + pickup bubble icons |
 | `assets/ui/coconut.png` | Delivery bubble icon (lion toy phase) |
 
----
+### Audio (MP3)
+All audio files must be `.mp3` — Phaser's extension-to-MIME mapping does not reliably handle `.mpeg` or other variants.
 
-## 8. Improvement Points for Future 3D Games
-
-These are patterns observed in the codebase that could be abstracted, replaced, or refined to make building the *next* 3D playable ad significantly faster and less error-prone.
-
----
-
-### 8.1 Extract an `AssetLoader` Service
-
-**Current situation:** Asset loading is scattered across five separate methods (`loadFences`, `loadPlayer`, `loadAnimals`, `loadItems`, `loadProps`). Each one calls `this.third.load.gltf(path)` directly and handles its own error handling inconsistently (some have try/catch, some don't). `loadProps` has its own local cache Map; nothing else does.
-
-**Improvement:** A single `AssetLoader` class or utility:
-```typescript
-class AssetLoader {
-  private cache = new Map<string, Group>()
-
-  async load(path: string): Promise<Group | null> {
-    if (this.cache.has(path)) return this.cache.get(path)!.clone(true)
-    try {
-      const gltf = await this.third.load.gltf(path)
-      this.cache.set(path, gltf.scene)
-      return gltf.scene.clone(true)
-    } catch {
-      console.warn(`[AssetLoader] Failed: ${path}`)
-      return null
-    }
-  }
-
-  async loadMany(paths: string[]): Promise<(Group | null)[]> {
-    return Promise.all(paths.map(p => this.load(p)))
-  }
-}
-```
-
-**Benefit:** Eliminates 5 repetitive try/catch blocks, automatically deduplicates loads (unifying `loadProps`'s ad-hoc local cache into one global cache), and makes `Promise.all` parallel loading the default everywhere.
+| File | Key | Used for |
+|---|---|---|
+| `assets/audios/bgm.mp3` | `bgm` | Background music loop |
+| `assets/audios/win-sound.mp3` | `sfx-win` | End-card fanfare |
+| `assets/audios/monkey.mp3` | `sfx-monkey` | Monkey delivery cheer |
+| `assets/audios/elephant.mp3` | `sfx-elephant` | Elephant delivery cheer |
+| `assets/audios/lion.mp3` | `sfx-lion` | Lion delivery cheer |
+| `assets/audios/Coin Bag 3-1.mp3` | `sfx-coin` | Star collect + enclosure purchase |
+| `assets/audios/Whoosh.mp3` | `sfx-whoosh` | Bubble pop-in |
+| `assets/audios/Footsteps_Sand_Walk_01.mp3` | `sfx-footstep-1` | Walk sound variant 1 |
+| `assets/audios/Footsteps_Sand_Walk_10.mp3` | `sfx-footstep-2` | Walk sound variant 2 |
+| `assets/audios/Footsteps_Sand_Walk_17.mp3` | `sfx-footstep-3` | Walk sound variant 3 |
 
 ---
 
-### 8.2 Make `create()` Fully Parallel
-
-**Current situation:** `create()` calls `loadFences()`, `loadPlayer()`, `loadAnimals()`, `loadItems()`, `loadProps()` sequentially with `await`. Total load time = sum of all load times. Note that `loadAnimals` already uses `Promise.all` internally — the remaining sequential bottleneck is between these five top-level calls.
-
-**Improvement:**
-```typescript
-await Promise.all([
-  this.loadFences(),
-  this.loadPlayer(),
-  this.loadAnimals(),
-  this.loadItems(),
-  this.loadProps(),
-])
-```
-
-**Benefit:** Total load time = longest single load time. On a typical connection this could cut asset loading time by 3–4×. The only constraint is that none of these methods may read results set by another (already true in the current codebase).
+## 10. Remaining Improvement Points
 
 ---
 
-### 8.3 Extract a `WorldUI` Projection Utility
+The following improvements were identified during the initial codebase review. Most have been implemented. The two remaining items are the highest-value refactors still pending.
 
-**Current situation:** `project(worldPos)` and `_screenEdgeClamp(tx, ty, margin)` are instance methods on `GameScene`. Any future scene that needs 3D→2D projection must re-implement this logic.
+### ✅ Implemented
 
-**Improvement:** A standalone `WorldUI` utility module:
-```typescript
-export function projectToScreen(worldPos: Vector3, camera: Camera, w: number, h: number) {
-  const v = worldPos.clone().project(camera)
-  return { x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h }
-}
+| # | Improvement | Where |
+|---|---|---|
+| 8.1 | Extract an `AssetLoader` service | `utils/AssetLoader.ts` |
+| 8.2 | Make `create()` fully parallel | `GameScene.ts` — `Promise.all([...5 loaders])` |
+| 8.3 | Extract a `WorldUI` projection utility | `utils/WorldUI.ts` |
+| 8.4 | Replace phase string with `PhaseManager` | `managers/PhaseManager.ts` |
+| 8.5 | Centralise magic numbers | `constants.ts` |
+| 8.6 | Type player/mixer references properly | `GameScene.ts` — `Group | null`, `AnimationMixer | null` |
+| 8.7 | Make `AnimalWander` animation-aware | `zoo/AnimalWander.ts` — `AnimalAnimPair` param |
+| 8.8 | Move bubble creation into a `BubbleFactory` | `ui/BubbleFactory.ts` |
+| 8.9 | Event bus for `onDelivery` consequences | `GameScene.ts` — `_setupDeliveryListeners()` + `events.emit` |
+| 8.10 | Implement the CTA store redirect | `GameScene.ts` — `window.onCTATapped` + `window.open` fallback |
+| 8.11 | Add a `shutdown()` teardown | `GameScene.ts` — joystick removal, tween kill, geometry dispose |
+| — | Add a `SoundManager` | `managers/SoundManager.ts` |
+| — | Centralise audio volumes | `config/AudioConfig.ts` |
+| — | Fix double-purchase rapid-tap bug | `purchaseEnclosure` — reserve-first guard |
 
-export function clampToScreenEdge(
-  tx: number, ty: number, margin: number, w: number, h: number, topMargin = margin
-) { /* ... */ }
-```
-
-**Benefit:** Any future scene can import and use these immediately. This is the most universally useful utility in the codebase — every 3D game with a 2D overlay will need it.
-
----
-
-### 8.4 Replace the Phase String with a `PhaseManager`
-
-**Current situation:** `this.phase` is a raw string, and phase transitions happen inside `onDelivery()` which also handles FX, needs resets, item reveals, and prestige. This is a multi-concern method (~55 lines).
-
-**Improvement:** A small `PhaseManager` class:
-```typescript
-class PhaseManager {
-  private phaseId: string
-  get current(): PhaseConfig { ... }
-  get isLastPhase(): boolean { ... }
-  advance(nextId: string): void { ... }
-}
-```
-
-**Benefit:** Phase logic becomes inspectable and testable in isolation. Adding a new completion consequence (e.g. "unlock a new prop") is a new handler, not a new branch in `onDelivery`.
+All identified improvement points have been implemented.
 
 ---
 
-### 8.5 Centralise Magic Numbers into a `GameConstants` File
-
-**Current situation:** Values like `74` (bubble width), `0.1` (camera lerp), `1.8` (auto-pickup range), `dt * 6` (animation blend rate), `RING_R = 32`, `MARGIN = 58`, `idleRate = 0.025` appear inline throughout the scene.
-
-**Improvement:** A `src/scripts/constants.ts` file:
-```typescript
-export const BUBBLE_SIZE         = 74
-export const CAMERA_LERP         = 0.1
-export const AUTO_PICKUP_RADIUS  = 1.8
-export const ANIM_BLEND_RATE     = 6
-export const HUD_RING_RADIUS     = 32
-export const HUD_EDGE_MARGIN     = 58
-export const NEEDS_IDLE_RATE     = 0.025
-```
-
-**Benefit:** Tuning the feel of the game (camera lag, pickup radius, needs drain) becomes a single-file edit. Avoids the risk of updating a value in one place but missing it in another.
-
----
-
-### 8.6 Type the Player and Mixer References Properly
-
-**Current situation:**
-```typescript
-private player: any = null
-private mixer:  any = null
-```
-`any` defeats TypeScript's type checking on every player and mixer access.
-
-**Improvement:**
-```typescript
-import type { Group, AnimationMixer } from 'three'
-
-private player: Group | null = null
-private mixer:  AnimationMixer | null = null
-```
-
-**Benefit:** Immediate IDE autocompletion and compile-time safety on all `player`/`mixer` property accesses. Lowest-effort improvement with the highest immediate developer experience gain.
-
----
-
-### 8.7 Make `AnimalWander` Animation-Aware (Optional)
-
-**Current situation:** `AnimalWander` exposes `isMoving: boolean` and GameScene manually blends animation weights in the main loop. The blending logic is external to the AI.
-
-**Improvement:** Pass the `{ staticAction, walkAction }` pair into `AnimalWander` as an optional second argument:
-```typescript
-constructor(entity: Group, config: AnimalWanderConfig = {}, anim?: AnimalAnimPair)
-// internally: blend walkAction weight based on isMoving state
-```
-
-**Benefit:** The game loop's animal section collapses from 10 lines to 3. Animation blending is co-located with movement logic where it semantically belongs.
-
----
-
-### 8.8 Move Bubble Creation into a `BubbleFactory`
-
-**Current situation:** `_createActionBubble` and `_createPurchaseBubble` are ~30-line methods on the scene class that build Phaser `Container` hierarchies. Any future interactable that needs a different bubble style requires a new scene method.
-
-**Improvement:** A `BubbleFactory` module:
-```typescript
-export const BubbleFactory = {
-  action:   (scene: Phaser.Scene, label: string, iconKey?: string) => { ... },
-  purchase: (scene: Phaser.Scene, cost: number) => { ... },
-}
-```
-
-**Benefit:** Decouples visual construction from game logic. Can be reused across multiple scenes. Makes testing bubble visuals in isolation possible.
-
----
-
-### 8.9 Use Phaser's Event Bus for `onDelivery` Consequences
-
-**Current situation:** `onDelivery()` directly calls `successEffect()`, `spawnHearts()`, `flyStars()`, `_advancePrestige()`, `_activateTimerForCurrentPhase()`, and `showEndcard()`. It is the single biggest multi-concern method in the codebase (~55 lines).
-
-**Improvement:** Phaser's built-in event system (`this.events`) is already available:
-```typescript
-this.events.emit('delivery:success', { phase, starsAwarded })
-// listeners registered in setupUI, setupFX, etc:
-this.events.on('delivery:success', ({ starsAwarded }) => this.flyStars(starsAwarded, ...))
-this.events.on('delivery:success', () => this._advancePrestige())
-```
-
-**Benefit:** `onDelivery` shrinks to emitting one event. Systems subscribe to events they care about. Adding a new consequence (SFX, haptics, analytics) is a new listener — zero modification to existing code. Zero additional dependencies.
-
----
-
-### 8.10 Implement the CTA Store Redirect
-
-**Current situation:** The "PLAY NOW!" button only does `console.log('CTA → store redirect')`.
-
-**Improvement:** Replace with the actual redirect, ideally behind an interface that ad networks can inject:
-```typescript
-// Simple approach:
-window.open('https://play.google.com/store/apps/details?id=com.your.game', '_blank')
-
-// Ad-network-compatible approach (most networks provide a callback):
-if (typeof window.onCTATapped === 'function') window.onCTATapped()
-else window.open(STORE_URL, '_blank')
-```
-
-**Benefit:** Without this, the ad generates zero installs regardless of how engaging the gameplay is. This is the highest-priority fix before any live deployment.
-
----
-
-### 8.11 Add a Scene `shutdown()` Teardown Contract
-
-**Current situation:** There's no `shutdown()` or `destroy()` method. The joystick DOM element, tween references, and Three.js scene objects are never cleaned up. For a single-scene ad this is fine — the page is discarded. For multi-scene games this causes memory leaks.
-
-**Improvement:**
-```typescript
-shutdown() {
-  this.joystickEl?.remove()
-  this.animalWanders.clear()
-  this.tweens.killAll()
-  // dispose Three.js geometry/materials
-  this.third.scene.traverse((obj: any) => {
-    obj.geometry?.dispose()
-    if (Array.isArray(obj.material)) obj.material.forEach((m: any) => m.dispose())
-    else obj.material?.dispose()
-  })
-}
-```
-
-**Benefit:** Makes the project safe to extend with multiple scenes (main menu → game → leaderboard) without memory bloat or ghost tweens from a previous scene.
-
----
-
-*Documentation generated and validated March 2026 — reflects codebase at that date.*
+*Documentation updated March 2026 — reflects all refactoring sessions completed to date.*

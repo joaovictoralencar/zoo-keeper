@@ -5,7 +5,7 @@ import {
     PerspectiveCamera, PlaneGeometry, SphereGeometry, Vector3,
 } from 'three'
 import {AnimalWander, AnimalAnimPair} from '../zoo/AnimalWander'
-import type {LevelData, AnimalConfig, EnclosureConfig} from '../types/LevelData'
+import type {LevelData, AnimalConfig, EnclosureConfig, PhaseConfig} from '../types/LevelData'
 import {
     GAME_W, GAME_H, FONT,
     ACTION_BUBBLE_W, ACTION_BUBBLE_H, PURCHASE_BUBBLE_W, PURCHASE_BUBBLE_H, BUBBLE_RADIUS,
@@ -18,6 +18,7 @@ import { projectToScreen, clampToScreenEdge } from '../utils/WorldUI'
 import { createActionBubble, createPurchaseBubble } from '../ui/BubbleFactory'
 import { AssetLoader } from '../utils/AssetLoader'
 import { SoundManager } from '../managers/SoundManager'
+import { PhaseManager } from '../managers/PhaseManager'
 import { AudioConfig } from '../config/AudioConfig'
 
 function parseHex(s: string): number {
@@ -39,11 +40,24 @@ interface CarriedItem {
     mesh: Group | Mesh
 }
 
+/** Payload emitted on the 'delivery:success' event. */
+interface DeliveryPayload {
+    /** The phase that was just completed (before advancing). */
+    phase:  PhaseConfig
+    /** Enclosure config for that phase (may be undefined if misconfigured). */
+    enc:    EnclosureConfig | undefined
+    /** All 3D animal groups in the enclosure. */
+    groups: Group[]
+    /** First group — used as the reference point for screen projections. */
+    group:  Group | undefined
+}
+
 export default class GameScene extends Scene3D {
     // ── level data ────────────────────────────────────────────────────────
     private ld!: LevelData
     private assetLoader!: AssetLoader
     private sfx!: SoundManager
+    private phaseManager!: PhaseManager
 
     // ── movement ─────────────────────────────────────────────────────────
     private moveData = {top: 0, right: 0}
@@ -59,7 +73,6 @@ export default class GameScene extends Scene3D {
     private footstepSound: Phaser.Sound.BaseSound | null = null
 
     // ── game state ────────────────────────────────────────────────────────
-    private phase = 'monkey'
     private carriedItems: CarriedItem[] = []
     private interactables: Interactable[] = []
     private animalWanders: Map<string, AnimalWander> = new Map()
@@ -67,7 +80,6 @@ export default class GameScene extends Scene3D {
     // ── 3-D objects ───────────────────────────────────────────────────────
     private animalGroups = new Map<string, Group[]>()   // [0] = primary used for icons/effects
     private animalOriginalMats = new Map<Mesh, any>()
-    private animalMixers = new Map<string, { staticAction: AnimationAction; walkAction: AnimationAction }>()
     private itemMeshes = new Map<string, Group | Mesh>()
     private itemPositions = new Map<string, Vector3>()
     private itemBaseY = new Map<string, number>()
@@ -103,7 +115,6 @@ export default class GameScene extends Scene3D {
 
     // ── star currency ──────────────────────────────────────────────────────
     private starCount = 0
-    private starsCollected = 0
     private purchasedEnclosures = new Set<string>()
     private starHud: Phaser.GameObjects.Container | null = null
     private starHudText: Phaser.GameObjects.Text | null = null
@@ -159,6 +170,7 @@ export default class GameScene extends Scene3D {
     async create() {
         this.ld = this.cache.json.get('level') as LevelData
         this.assetLoader = new AssetLoader(this.third)
+        this.phaseManager = new PhaseManager(this.ld.phases)
         this.sfx = new SoundManager(this, { musicVolume: AudioConfig.master.music, sfxVolume: AudioConfig.master.sfx })
         this.sfx.playMusic('bgm', { fadeIn: AudioConfig.timing.musicFadeIn })
         // Pre-create looping footstep sounds so we always hold a reliable reference
@@ -226,6 +238,7 @@ export default class GameScene extends Scene3D {
         this.setupCamera()
         this.setupJoystick()
         this.setupUI()
+        this._setupDeliveryListeners()
         this.needsDrainActive = true
         this._showTutorial()
     }
@@ -390,7 +403,7 @@ export default class GameScene extends Scene3D {
             const group = gltf.scene.clone(true)
 
             // Spread X across enclosure width, alternate Z for visual variety
-            const xMin = enc.zoneXMin + 2, xMax = enc.zoneXMax - 2
+            const xMin = enc.centerX - enc.width / 2 + 2, xMax = enc.centerX + enc.width / 2 - 2
             const x = n <= 1 ? enc.centerX : xMin + (idx / Math.max(n - 1, 1)) * (xMax - xMin)
             const z = cfg.spawnZ + (idx % 2 === 0 ? 0 : -2.5)
             group.position.set(x, 0, z)
@@ -420,8 +433,8 @@ export default class GameScene extends Scene3D {
             this.animalWanders.set(wanderKey, new AnimalWander(group, {
                 wanderRadius: cfg.wanderRadius,
                 moveSpeed: cfg.moveSpeed,
-                xMin: enc.zoneXMin + 0.5,
-                xMax: enc.zoneXMax - 0.5,
+                xMin: enc.centerX - enc.width / 2 + 0.5,
+                xMax: enc.centerX + enc.width / 2 - 0.5,
                 zMin: -10.5,
                 zMax: -3.5,
             }, animPair))
@@ -471,7 +484,9 @@ export default class GameScene extends Scene3D {
 
     private async loadItems() {
         await Promise.all(this.ld.items.map(async cfg => {
-            const pos = new Vector3(cfg.position.x, cfg.position.y, cfg.position.z)
+            const enc = this.ld.enclosures.find(e => e.id === cfg.enclosureId)
+            const x = enc ? enc.centerX : 0
+            const pos = new Vector3(x, cfg.positionY, cfg.positionZ)
             this.itemPositions.set(cfg.type, pos)
 
             let mesh: Group | Mesh
@@ -532,11 +547,11 @@ export default class GameScene extends Scene3D {
                 getWorldPos: () => new Vector3(enc.centerX, 0, -3.5),
                 action: () => this.deliver(phase.requiredItem, phase.id),
                 isAvailable: () =>
-                    this.phase === phase.id &&
+                    this.phaseManager.currentId === phase.id &&
                     this.purchasedEnclosures.has(phase.enclosureId) &&
                     this.carrying(phase.requiredItem),
                 bubbleLabel: phase.deliveryLabel,
-                bubbleIcon:  phase.deliveryIcon ?? undefined,
+                bubbleIcon:  phase.deliveryIcon,
             })
         }
 
@@ -585,7 +600,6 @@ export default class GameScene extends Scene3D {
             carryObj = this._fallbackMesh(type)
         }
         this.third.scene.add(carryObj)
-        this.normalizeAnimalHeight(carryObj, CARRY_ITEM_HEIGHT)
         carryObj.position.y = 0
         this.carriedItems.push({type, mesh: carryObj})
         if (original) original.visible = false
@@ -600,68 +614,76 @@ export default class GameScene extends Scene3D {
     }
 
     private onDelivery() {
-        const phase = this.ld.phases.find(p => p.id === this.phase)
+        const phase = this.phaseManager.current
         if (!phase) return
-        const {onComplete} = phase
-
-        // Animal reaction sound — key matches the animal id (monkey/elephant/lion)
-        this.sfx.playSfx(`sfx-${phase.animalId}`, { volume: AudioConfig.sfx.animal })
-
-        const enc = this.ld.enclosures.find(e => e.id === phase.enclosureId)
+        const enc    = this.ld.enclosures.find(e => e.id === phase.enclosureId)
         const groups = this.animalGroups.get(phase.animalId) ?? []
-        const group = groups[0]  // reference point for projection
+        const group  = groups[0]
 
-        // Success bounce on every animal in the enclosure
-        for (const g of groups) this.successEffect(g)
+        // Advance phase state BEFORE emitting so listeners that call
+        // _activateTimerForCurrentPhase() already see the new phase.
+        this.phaseManager.advance(phase.onComplete.nextPhase)
 
-        // Hearts burst above the animal (deep in the cage — projects high on screen)
-        if (group) {
-            const sp = this.project(new Vector3(group.position.x, group.position.y + 2, group.position.z))
-            this.spawnHearts(sp.x, sp.y)
-        }
+        this.events.emit('delivery:success', { phase, enc, groups, group } as DeliveryPayload)
+    }
 
-        // Stars fly from the delivery gate (near the fence — projects low on screen, away from hearts)
-        if (onComplete.starsAwarded) {
+    /** Register all delivery:success listeners. Called once from create(). */
+    private _setupDeliveryListeners() {
+        // 1. Animal reaction sound
+        this.events.on('delivery:success', ({ phase }: DeliveryPayload) => {
+            this.sfx.playSfx(`sfx-${phase.animalId}`, { volume: AudioConfig.sfx.animal })
+        }, this)
+
+        // 2. Visual FX — success bounce + hearts burst
+        this.events.on('delivery:success', ({ groups, group }: DeliveryPayload) => {
+            for (const g of groups) this.successEffect(g)
+            if (group) {
+                const sp = this.project(new Vector3(group.position.x, group.position.y + 2, group.position.z))
+                this.spawnHearts(sp.x, sp.y)
+            }
+        }, this)
+
+        // 3. Star reward
+        this.events.on('delivery:success', ({ phase, enc, group }: DeliveryPayload) => {
+            if (!phase.onComplete.starsAwarded) return
             const gatePos = enc
                 ? this.project(new Vector3(enc.centerX, 1.5, -3.5))
                 : group
                     ? this.project(new Vector3(group.position.x, group.position.y + 2, group.position.z))
-                    : {x: GAME_W / 2, y: GAME_H / 2}
-            this.flyStars(onComplete.starsAwarded, gatePos.x, gatePos.y)
-        }
+                    : { x: GAME_W / 2, y: GAME_H / 2 }
+            this.flyStars(phase.onComplete.starsAwarded, gatePos.x, gatePos.y)
+        }, this)
 
-        // Restore this animal's needs to full on delivery
-        this.animalNeeds.set(phase.animalId, 1.0)
-        // Once fed, ring is permanently removed for this animal
-        this.fedAnimals.add(phase.animalId)
+        // 4. Needs + prestige state updates
+        this.events.on('delivery:success', ({ phase }: DeliveryPayload) => {
+            this.animalNeeds.set(phase.animalId, 1.0)
+            this.fedAnimals.add(phase.animalId)
+            if (!phase.onComplete.showItemType && phase.onComplete.starsAwarded) {
+                this.completedAnimals.add(phase.animalId)
+                this.prestigeLevel++
+                this._advancePrestige()
+            }
+        }, this)
 
-        // Advance prestige when an animal fully completes (not intermediate showItemType steps)
-        if (!onComplete.showItemType && onComplete.starsAwarded) {
-            this.completedAnimals.add(phase.animalId)
-            this.prestigeLevel++
-            this._advancePrestige()
-        }
-
-        if (onComplete.showItemType) {
-            const shownMesh = this.itemMeshes.get(onComplete.showItemType)
-            if (shownMesh) shownMesh.visible = true
-            this.phase = onComplete.nextPhase
-            this._activateTimerForCurrentPhase()
-
-        } else if (onComplete.endGame) {
-            this.phase = onComplete.nextPhase
-            this.needsDrainActive = false
-            this.time.delayedCall(1800, () => this.showEndcard(), [], this)
-
-        } else {
-            this.phase = onComplete.nextPhase
-            this._activateTimerForCurrentPhase()
-        }
+        // 5. Phase transition — reveal items / start next timer / end game
+        this.events.on('delivery:success', ({ phase }: DeliveryPayload) => {
+            const { onComplete } = phase
+            if (onComplete.showItemType) {
+                const shownMesh = this.itemMeshes.get(onComplete.showItemType)
+                if (shownMesh) shownMesh.visible = true
+                this._activateTimerForCurrentPhase()
+            } else if (onComplete.endGame) {
+                this.needsDrainActive = false
+                this.time.delayedCall(1800, () => this.showEndcard(), [], this)
+            } else {
+                this._activateTimerForCurrentPhase()
+            }
+        }, this)
     }
 
     /** Reset needs for the incoming phase's animal, unless it's still locked. */
     private _activateTimerForCurrentPhase() {
-        const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
+        const phaseCfg = this.phaseManager.current
         if (!phaseCfg) { this.needsDrainActive = false; return }
         const animalCfg = this.ld.animals.find(a => a.id === phaseCfg.animalId)
         const encCfg = this.ld.enclosures.find(e => e.id === phaseCfg.enclosureId)
@@ -718,7 +740,6 @@ export default class GameScene extends Scene3D {
 
     private flyStars(count: number, fromX: number, fromY: number) {
         const toX = GAME_W - 68, toY = 26
-        this.starsCollected += count
 
         // "+N" popup springs up from delivery point
         const plusText = this.add.text(fromX, fromY - 20, `+${count}`, {
@@ -751,7 +772,7 @@ export default class GameScene extends Scene3D {
                     onComplete: () => {
                         star.destroy()
                         // Coin ding per star — pitch rises slightly each hit
-                        const rate = 0.9 + (i / (visual - 1)) * 0.2
+                        const rate = 0.9 + (i / Math.max(visual - 1, 1)) * 0.2
                         this.sfx.playSfx('sfx-coin', { volume: AudioConfig.sfx.coinStar, rate })                        
                         this.starCount = oldCount + Math.round(count * (i + 1) / visual)
                         if (this.starHudText) this.starHudText.setText(String(this.starCount))
@@ -948,7 +969,7 @@ export default class GameScene extends Scene3D {
     private updateAnimalHud() {
         const RING_R = HUD_RING_RADIUS
         const MARGIN = HUD_EDGE_MARGIN
-        const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
+        const phaseCfg = this.phaseManager.current
 
         for (const [animalId, hud] of this.animalHudItems) {
             const animal = this.ld.animals.find(a => a.id === animalId)
@@ -1039,6 +1060,7 @@ export default class GameScene extends Scene3D {
         if (this.starHudText) this.starHudText.setText(String(this.starCount))
 
         const animalCfg = this.ld.animals.find(a => a.enclosureId === encId)
+        const phaseCfg = this.phaseManager.current
         if (animalCfg) {
             // Reveal 3D animals with stagger
             const groups = this.animalGroups.get(animalCfg.id) ?? []
@@ -1070,7 +1092,6 @@ export default class GameScene extends Scene3D {
             }
 
             // Activate needs for this animal if it's the current phase
-            const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
             if (phaseCfg?.animalId === animalCfg.id) {
                 this.animalNeeds.set(animalCfg.id, 1.0)
                 this.needsDrainActive = true
@@ -1125,7 +1146,7 @@ export default class GameScene extends Scene3D {
 
     private _showTutorial() {
         const tut = this.ld.tutorial
-        if (!tut?.steps?.length) return
+        if (!tut) return
 
         // Joystick sits at bottom-left; position hint just above and to the right of it
         const tx = 190, ty = GAME_H - 190
@@ -1185,7 +1206,7 @@ export default class GameScene extends Scene3D {
     }
 
     private updateAutoPickup() {
-        const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
+        const phaseCfg = this.phaseManager.current
         if (!phaseCfg) return
         if (this.carrying(phaseCfg.requiredItem)) return
         if (!this.purchasedEnclosures.has(phaseCfg.enclosureId)) return
@@ -1204,7 +1225,7 @@ export default class GameScene extends Scene3D {
             const arrow = this.pickupArrows.get(phase.requiredItem)
             if (!arrow) continue
             const available =
-                this.phase === phase.id &&
+                this.phaseManager.currentId === phase.id &&
                 this.purchasedEnclosures.has(phase.enclosureId) &&
                 !this.carrying(phase.requiredItem) &&
                 (this.itemMeshes.get(phase.requiredItem)?.visible ?? false)
@@ -1334,7 +1355,7 @@ export default class GameScene extends Scene3D {
                 const phase = this.ld.phases.find(p => p.id === phaseId)
                 const enc = phase ? this.ld.enclosures.find(e => e.id === phase.enclosureId) : null
                 const inZone = enc
-                    ? (px >= enc.zoneXMin && px <= enc.zoneXMax && pz < this.ld.world.enclosureEntryZ)
+                    ? (px >= enc.centerX - enc.width / 2 && px <= enc.centerX + enc.width / 2 && pz < this.ld.world.enclosureEntryZ)
                     : Math.hypot(px - wp.x, pz - wp.z) < range
                 show = available && inZone
             } else {
@@ -1362,9 +1383,9 @@ export default class GameScene extends Scene3D {
 
     private updateNeeds(dt: number) {
         if (!this.player) return
-        if (!this.needsDrainActive || this.phase === 'done') return
+        if (!this.needsDrainActive || this.phaseManager.isDone) return
 
-        const phaseCfg = this.ld.phases.find(p => p.id === this.phase)
+        const phaseCfg = this.phaseManager.current
         const px = this.player.position.x
         const pz = this.player.position.z
         const activeDrainRate = 1 / this.ld.world.timerDuration
@@ -1464,26 +1485,26 @@ export default class GameScene extends Scene3D {
 
         // If current phase was preceded by a "showItemType" step (e.g. lion_food after lion_toy),
         // revert to that previous phase and hide the revealed item.
-        const currentPhase = this.ld.phases.find(p => p.id === this.phase)
+        const currentPhase = this.phaseManager.current
         if (currentPhase) {
-            const idx = this.ld.phases.indexOf(currentPhase)
+            const idx = this.phaseManager.indexOf(currentPhase.id)
             const prevPhase = idx > 0 ? this.ld.phases[idx - 1] : null
             if (prevPhase?.animalId === currentPhase.animalId && prevPhase.onComplete.showItemType) {
-                this.phase = prevPhase.id
+                this.phaseManager.advance(prevPhase.id)
                 const shownMesh = this.itemMeshes.get(prevPhase.onComplete.showItemType)
                 if (shownMesh) shownMesh.visible = false
             }
         }
 
         // Ensure the current phase's item is visible
-        const activePhaseCfg = this.ld.phases.find(p => p.id === this.phase)
+        const activePhaseCfg = this.phaseManager.current
         if (activePhaseCfg) {
             const m = this.itemMeshes.get(activePhaseCfg.requiredItem)
             if (m) m.visible = true
         }
 
         // Reset needs for current animal to full
-        const resetPhase = this.ld.phases.find(p => p.id === this.phase)
+        const resetPhase = this.phaseManager.current
         if (resetPhase) this.animalNeeds.set(resetPhase.animalId, 1.0)
         this.needsDrainActive = true
     }
